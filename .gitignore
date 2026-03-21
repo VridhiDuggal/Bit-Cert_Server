@@ -1,0 +1,27 @@
+# Node
+node_modules/
+npm-debug.log
+
+# Env
+.env
+
+# Wallets (CRITICAL)
+src/wallet/
+src/src/wallet/
+
+# Fabric crypto (CRITICAL)
+fabric-samples/
+
+# Chaincode vendor (optional)
+chaincode/bitcert/vendor/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+
+# Build / temp
+dist/
+uploads/

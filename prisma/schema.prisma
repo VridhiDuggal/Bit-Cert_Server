@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrgStatus {
+  active
+  revoked
+}
+
+model Organisation {
+  org_id       String         @id @default(uuid()) @db.Uuid
+  msp_id       String         @unique
+  org_name     String
+  email        String
+  public_key   String
+  fabric_cert  String
+  enrolled_at  DateTime       @default(now())
+  status       OrgStatus
+
+  certificates  Certificate[]
+  recipients    Recipient[]
+  inviteTokens  InviteToken[]
+
+  @@index([email])
+}
+
+model Recipient {
+  recipient_id      String         @id @default(uuid()) @db.Uuid
+  email             String         @unique
+  did               String
+  invited_by_org_id String         @db.Uuid
+  enrolled_at       DateTime       @default(now())
+
+  organisation  Organisation   @relation(fields: [invited_by_org_id], references: [org_id])
+  certificates  Certificate[]
+
+  @@index([invited_by_org_id])
+}
+
+model InviteToken {
+  invite_id        String       @id @default(uuid()) @db.Uuid
+  org_id           String       @db.Uuid
+  recipient_email  String
+  token_hash       String       @unique @db.Char(64)
+  expires_at       DateTime
+  used_at          DateTime?
+  created_at       DateTime     @default(now())
+
+  organisation  Organisation  @relation(fields: [org_id], references: [org_id])
+
+  @@index([org_id])
+  @@index([recipient_email])
+}
+
+model Certificate {
+  certificate_id   String       @id @default(uuid()) @db.Uuid
+  org_id           String       @db.Uuid
+  recipient_id     String       @db.Uuid
+  cert_hash        String       @unique @db.Char(64)
+  ecdsa_signature  String
+  blockchain_tx_id String
+  file_path        String
+  issued_at        DateTime     @default(now())
+  is_revoked       Boolean      @default(false)
+
+  organisation      Organisation       @relation(fields: [org_id], references: [org_id])
+  recipient         Recipient          @relation(fields: [recipient_id], references: [recipient_id])
+  verificationLogs  VerificationLog[]
+
+  @@index([org_id])
+  @@index([recipient_id])
+  @@index([blockchain_tx_id])
+}
+
+model VerificationLog {
+  log_id          String       @id @default(uuid()) @db.Uuid
+  certificate_id  String       @db.Uuid
+  verified_at     DateTime     @default(now())
+  verifier_ip     String
+  result          Boolean
+
+  certificate  Certificate  @relation(fields: [certificate_id], references: [certificate_id])
+
+  @@index([certificate_id])
+  @@index([verified_at])
+}
