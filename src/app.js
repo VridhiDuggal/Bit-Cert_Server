@@ -14,6 +14,9 @@ const { StatusCodes } = require('http-status-codes');
 const errorHandler  = require('./middleware/errorHandler');
 const testRoutes    = require('./routes/test.routes');
 const cryptoRoutes  = require('./routes/crypto.routes');
+const orgRoutes         = require('./routes/org.routes');
+const certificateRoutes = require('./routes/certificate.routes');
+const recipientRoutes   = require('./routes/recipient.routes');
 
 const app = express();
 
@@ -66,6 +69,9 @@ app.get('/health', (req, res) => {
 // Example: app.use('/api/v1/auth', require('./routes/auth.routes'));
 app.use('/api', testRoutes);
 app.use('/api', cryptoRoutes);
+app.use('/api', orgRoutes);
+app.use('/api', certificateRoutes);
+app.use('/api', recipientRoutes);
 
 // ── 404 fallback ──────────────────────────────────────────────────────────────
 // Catches any request that did not match a registered route.

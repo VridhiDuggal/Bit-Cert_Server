@@ -12,14 +12,15 @@ enum OrgStatus {
 }
 
 model Organisation {
-  org_id       String         @id @default(uuid()) @db.Uuid
-  msp_id       String         @unique
-  org_name     String
-  email        String
-  public_key   String
-  fabric_cert  String
-  enrolled_at  DateTime       @default(now())
-  status       OrgStatus
+  org_id        String        @id @default(uuid()) @db.Uuid
+  msp_id        String        @unique
+  org_name      String
+  email         String        @unique
+  public_key    String
+  private_key   String
+  password_hash String
+  enrolled_at   DateTime      @default(now())
+  status        OrgStatus     @default(active)
 
   certificates  Certificate[]
   recipients    Recipient[]
@@ -31,9 +32,10 @@ model Organisation {
 model Recipient {
   recipient_id      String         @id @default(uuid()) @db.Uuid
   email             String         @unique
-  did               String
+  name              String
+  did               String?
   invited_by_org_id String         @db.Uuid
-  enrolled_at       DateTime       @default(now())
+  created_at        DateTime       @default(now())
 
   organisation  Organisation   @relation(fields: [invited_by_org_id], references: [org_id])
   certificates  Certificate[]

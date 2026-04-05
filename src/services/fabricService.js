@@ -59,6 +59,13 @@ async function connectGateway() {
   return _contract;
 }
 
+function isStaleConnectionError(msg) {
+  return msg.includes('access denied') ||
+         msg.includes('UNAVAILABLE') ||
+         msg.includes('CANCELLED') ||
+         msg.includes('Failed to connect');
+}
+
 async function submitTransaction(functionName, ...args) {
   const contract = await connectGateway();
 
@@ -71,6 +78,10 @@ async function submitTransaction(functionName, ...args) {
     return result.length ? JSON.parse(result.toString()) : null;
 
   } catch (err) {
+    if (isStaleConnectionError(err.message)) {
+      console.warn('⚠️  Stale Fabric connection detected — resetting gateway.');
+      await disconnectGateway();
+    }
     console.error(`❌ submitTransaction "${functionName}" failed:`, err.message);
     throw new Error(`submitTransaction "${functionName}" failed: ${err.message}`);
   }
@@ -85,9 +96,19 @@ async function evaluateTransaction(functionName, ...args) {
       ...args.map(String)
     );
 
-    return result.length ? JSON.parse(result.toString()) : null;
+    if (!result.length) return null;
+    const raw = result.toString();
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
 
   } catch (err) {
+    if (isStaleConnectionError(err.message)) {
+      console.warn('⚠️  Stale Fabric connection detected — resetting gateway.');
+      await disconnectGateway();
+    }
     console.error(`❌ evaluateTransaction "${functionName}" failed:`, err.message);
     throw new Error(`evaluateTransaction "${functionName}" failed: ${err.message}`);
   }
