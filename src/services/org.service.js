@@ -8,16 +8,24 @@ const { submitTransaction, evaluateTransaction } = require('./fabricService');
 
 const BCRYPT_ROUNDS = 12;
 
-async function onboardOrg({ org_name, msp_id, email, password }) {
-  console.info(`[ORG] Onboarding started — msp_id: ${msp_id}, email: ${email}`);
+function deriveMspId(org_name) {
+  return org_name
+    .trim()
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join('') + 'MSP';
+}
+
+async function onboardOrg({ org_name, email, password }) {
+  const msp_id = deriveMspId(org_name);
 
   const existing = await prisma.organisation.findFirst({
     where: { OR: [{ email }, { msp_id }] },
   });
 
   if (existing) {
-    const field = existing.email === email ? 'email' : 'msp_id';
-    const err   = new Error(`An organisation with this ${field} already exists.`);
+    const err = new Error('An organisation with this email already exists.');
     err.statusCode = 409;
     throw err;
   }
@@ -39,21 +47,18 @@ async function onboardOrg({ org_name, msp_id, email, password }) {
     }
 
     if (alreadyRegistered) {
-      throw new Error(`Organisation ${msp_id} is already registered on the blockchain.`);
+      throw new Error(`Organisation is already registered on the blockchain.`);
     }
 
     await submitTransaction('RegisterOrg', msp_id, publicKey);
   } catch (fabricErr) {
-    console.error(`[ORG] Blockchain registration failed for ${msp_id} — rolling back DB:`, fabricErr.message);
     await prisma.organisation.delete({ where: { org_id: org.org_id } });
-    const err = new Error(`Blockchain registration failed: ${fabricErr.message}`);
+    const err = new Error('Blockchain registration failed. Please try again.');
     err.statusCode = 502;
     throw err;
   }
 
-  console.info(`[ORG] Onboarding success — org_id: ${org.org_id}, msp_id: ${msp_id}`);
-
-  const { private_key, password_hash: _ph, ...safeOrg } = org;
+  const { private_key, password_hash: _ph, msp_id: _msp, public_key: _pk, ...safeOrg } = org;
   return safeOrg;
 }
 
@@ -87,7 +92,7 @@ async function loginOrg({ email, password }) {
 
   return {
     token,
-    org: { org_id: org.org_id, msp_id: org.msp_id, org_name: org.org_name, email: org.email },
+    org: { org_id: org.org_id, org_name: org.org_name, email: org.email },
   };
 }
 

@@ -6,8 +6,6 @@ const { onboardOrg, loginOrg } = require('../services/org.service');
 
 const onboardSchema = Joi.object({
   org_name: Joi.string().trim().max(120).required(),
-  msp_id:   Joi.string().pattern(/^[A-Za-z0-9-]+$/).min(4).max(60).required()
-              .messages({ 'string.pattern.base': '"msp_id" may only contain letters, numbers, and hyphens.' }),
   email:    Joi.string().email().lowercase().required(),
   password: Joi.string().min(10).required(),
 });
