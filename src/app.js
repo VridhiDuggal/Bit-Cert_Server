@@ -9,7 +9,10 @@ const express      = require('express');
 const helmet       = require('helmet');
 const cors         = require('cors');
 const cookieSession = require('cookie-session');
+const rateLimit    = require('express-rate-limit');
 const { StatusCodes } = require('http-status-codes');
+
+const path         = require('path');
 
 const errorHandler  = require('./middleware/errorHandler');
 const testRoutes    = require('./routes/test.routes');
@@ -17,6 +20,7 @@ const cryptoRoutes  = require('./routes/crypto.routes');
 const orgRoutes         = require('./routes/org.routes');
 const certificateRoutes = require('./routes/certificate.routes');
 const recipientRoutes   = require('./routes/recipient.routes');
+const authRoutes        = require('./routes/auth.routes');
 
 const app = express();
 
@@ -67,11 +71,36 @@ app.get('/health', (req, res) => {
 // ── API routes ────────────────────────────────────────────────────────────────
 // Mount versioned route groups here as the project grows.
 // Example: app.use('/api/v1/auth', require('./routes/auth.routes'));
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max:      20,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message: { success: false, message: 'Too many requests. Please try again later.' },
+});
+
+const verifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max:      100,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message: { success: false, message: 'Too many requests. Please try again later.' },
+});
+
+app.use('/api/org/login',              authLimiter);
+app.use('/api/recipient/login',        authLimiter);
+app.use('/api/auth/forgot-password',   authLimiter);
+app.use('/api/auth/reset-password',    authLimiter);
+app.use('/api/verify',                 verifyLimiter);
+
 app.use('/api', testRoutes);
 app.use('/api', cryptoRoutes);
 app.use('/api', orgRoutes);
 app.use('/api', certificateRoutes);
 app.use('/api', recipientRoutes);
+app.use('/api', authRoutes);
+
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // ── 404 fallback ──────────────────────────────────────────────────────────────
 // Catches any request that did not match a registered route.

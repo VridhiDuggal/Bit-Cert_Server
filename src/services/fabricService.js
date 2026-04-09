@@ -67,51 +67,57 @@ function isStaleConnectionError(msg) {
 }
 
 async function submitTransaction(functionName, ...args) {
-  const contract = await connectGateway();
-
-  try {
-    const result = await contract.submitTransaction(
-      functionName,
-      ...args.map(String)
-    );
-
-    return result.length ? JSON.parse(result.toString()) : null;
-
-  } catch (err) {
-    if (isStaleConnectionError(err.message)) {
-      console.warn('⚠️  Stale Fabric connection detected — resetting gateway.');
-      await disconnectGateway();
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const contract = await connectGateway();
+    try {
+      const result = await contract.submitTransaction(
+        functionName,
+        ...args.map(String)
+      );
+      return result.length ? JSON.parse(result.toString()) : null;
+    } catch (err) {
+      lastErr = err;
+      if (isStaleConnectionError(err.message)) {
+        console.warn('⚠️  Stale Fabric connection detected — resetting gateway for retry.');
+        await disconnectGateway();
+        continue;
+      }
+      break;
     }
-    console.error(`❌ submitTransaction "${functionName}" failed:`, err.message);
-    throw new Error(`submitTransaction "${functionName}" failed: ${err.message}`);
   }
+  console.error(`❌ submitTransaction "${functionName}" failed:`, lastErr.message);
+  throw new Error(`submitTransaction "${functionName}" failed: ${lastErr.message}`);
 }
 
 async function evaluateTransaction(functionName, ...args) {
-  const contract = await connectGateway();
-
-  try {
-    const result = await contract.evaluateTransaction(
-      functionName,
-      ...args.map(String)
-    );
-
-    if (!result.length) return null;
-    const raw = result.toString();
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const contract = await connectGateway();
     try {
-      return JSON.parse(raw);
-    } catch {
-      return raw;
+      const result = await contract.evaluateTransaction(
+        functionName,
+        ...args.map(String)
+      );
+      if (!result.length) return null;
+      const raw = result.toString();
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
+    } catch (err) {
+      lastErr = err;
+      if (isStaleConnectionError(err.message)) {
+        console.warn('⚠️  Stale Fabric connection detected — resetting gateway for retry.');
+        await disconnectGateway();
+        continue;
+      }
+      break;
     }
-
-  } catch (err) {
-    if (isStaleConnectionError(err.message)) {
-      console.warn('⚠️  Stale Fabric connection detected — resetting gateway.');
-      await disconnectGateway();
-    }
-    console.error(`❌ evaluateTransaction "${functionName}" failed:`, err.message);
-    throw new Error(`evaluateTransaction "${functionName}" failed: ${err.message}`);
   }
+  console.error(`❌ evaluateTransaction "${functionName}" failed:`, lastErr.message);
+  throw new Error(`evaluateTransaction "${functionName}" failed: ${lastErr.message}`);
 }
 
 async function disconnectGateway() {

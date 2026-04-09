@@ -25,8 +25,24 @@ function validateEnv() {
     POSTGRES_DB:       str(),
 
     // ── Auth ──────────────────────────────────────────────────────────────
-    JWT_SECRET:     str(),
-    SESSION_SECRET: str(),
+    JWT_SECRET:           str(),
+    RECIPIENT_JWT_SECRET: str(),
+    SESSION_SECRET:       str(),
+
+    // ── Email ─────────────────────────────────────────────────────────────
+    SMTP_HOST:   str(),
+    SMTP_PORT:   str({ default: '587' }),
+    SMTP_USER:   str(),
+    SMTP_PASS:   str(),
+    SMTP_FROM:   str(),
+
+    // ── Invite ────────────────────────────────────────────────────────────
+    INVITE_SECRET: str(),
+
+    PRIVATE_KEY_SECRET: str(),
+
+    // ── App ───────────────────────────────────────────────────────────────
+    VERIFICATION_BASE_URL: url({ default: 'http://localhost:8000' }),
 
     // ── Hyperledger Fabric ────────────────────────────────────────────────
     FABRIC_CHANNEL_NAME:       str(),

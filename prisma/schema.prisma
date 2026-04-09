@@ -25,6 +25,7 @@ model Organisation {
   certificates  Certificate[]
   recipients    Recipient[]
   inviteTokens  InviteToken[]
+  auditLogs     AuditLog[]
 
   @@index([email])
 }
@@ -33,6 +34,7 @@ model Recipient {
   recipient_id      String         @id @default(uuid()) @db.Uuid
   email             String         @unique
   name              String
+  password_hash     String?
   did               String?
   invited_by_org_id String         @db.Uuid
   created_at        DateTime       @default(now())
@@ -66,6 +68,11 @@ model Certificate {
   ecdsa_signature  String
   blockchain_tx_id String
   file_path        String
+  recipient_name   String
+  course           String
+  description      String?
+  issue_date       DateTime
+  issued_by        String?
   issued_at        DateTime     @default(now())
   is_revoked       Boolean      @default(false)
 
@@ -89,4 +96,30 @@ model VerificationLog {
 
   @@index([certificate_id])
   @@index([verified_at])
+}
+
+model AuditLog {
+  log_id     String   @id @default(uuid()) @db.Uuid
+  org_id     String   @db.Uuid
+  action     String
+  target     String
+  metadata   Json?
+  created_at DateTime @default(now())
+
+  organisation Organisation @relation(fields: [org_id], references: [org_id])
+
+  @@index([org_id])
+  @@index([created_at])
+}
+
+model PasswordResetToken {
+  token_id   String    @id @default(uuid()) @db.Uuid
+  email      String
+  user_type  String
+  token_hash String    @unique @db.Char(64)
+  expires_at DateTime
+  used_at    DateTime?
+  created_at DateTime  @default(now())
+
+  @@index([email])
 }

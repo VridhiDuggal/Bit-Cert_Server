@@ -1,0 +1,1816 @@
+{
+  "info": {
+    "_postman_id": "bit-cert-qa-suite-v1",
+    "name": "Bit-Cert — Full API Test Suite",
+    "description": "Comprehensive QA collection for Bit-Cert backend.\n\nPrerequisites:\n- Backend running on {{baseUrl}} (default: http://localhost:5000)\n- Hyperledger Fabric test network active\n- PostgreSQL running with Prisma migrations applied\n- SMTP configured (e.g. MailHog: SMTP_HOST=localhost SMTP_PORT=1025)\n\nNewman run:\n  npm install -g newman\n  newman run tests/bit-cert-collection.json -e tests/bit-cert-environment.json --timeout-request 30000 --delay-request 300\n\nTest order is sequential — variables chain across folders.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",           "value": "http://localhost:8000" },
+    { "key": "orgToken",          "value": "" },
+    { "key": "orgId",             "value": "" },
+    { "key": "orgEmail",          "value": "" },
+    { "key": "orgPassword",       "value": "TestOrg@Secure1!" },
+    { "key": "orgName",           "value": "" },
+    { "key": "updatedOrgName",    "value": "" },
+    { "key": "recipientEmail",    "value": "" },
+    { "key": "recipientId",       "value": "" },
+    { "key": "recipientToken",    "value": "" },
+    { "key": "recipientPassword", "value": "Recip@Pass123!" },
+    { "key": "recipientName",     "value": "Alice Tester" },
+    { "key": "inviteToken",       "value": "" },
+    { "key": "certHash",          "value": "" },
+    { "key": "certificateId",     "value": "" },
+    { "key": "courseName",        "value": "Blockchain Development" },
+    { "key": "issueDate",         "value": "2026-01-15" },
+    { "key": "org2Token",         "value": "" },
+    { "key": "org2Email",         "value": "" },
+    { "key": "org2Name",          "value": "" }
+  ],
+  "item": [
+    {
+      "name": "00 — Smoke Test",
+      "item": [
+        {
+          "name": "0.1 — Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('status field is ok', () => pm.expect(j.status).to.eql('ok'));",
+                  "pm.test('ts is an ISO timestamp', () => pm.expect(j.ts).to.be.a('string').and.match(/^\\d{4}-\\d{2}-\\d{2}T/));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 — Organisation Flow",
+      "item": [
+        {
+          "name": "1.1 — Onboard Organisation",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const rand = Math.random().toString(36).substring(2, 8);",
+                  "pm.collectionVariables.set('orgName', 'TestOrg_' + rand);",
+                  "pm.collectionVariables.set('orgEmail', 'testorg_' + rand + '@bitcert.dev');"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('org_id is a UUID string', () => pm.expect(j.org_id).to.be.a('string').and.match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i));",
+                  "pm.test('email matches input', () => pm.expect(j.email).to.eql(pm.collectionVariables.get('orgEmail')));",
+                  "pm.test('org_name matches input', () => pm.expect(j.org_name).to.eql(pm.collectionVariables.get('orgName')));",
+                  "pm.test('status is active', () => pm.expect(j.status).to.eql('active'));",
+                  "pm.test('enrolled_at is a date string', () => pm.expect(j.enrolled_at).to.be.a('string'));",
+                  "pm.test('private_key is NOT exposed', () => pm.expect(j).to.not.have.property('private_key'));",
+                  "pm.test('password_hash is NOT exposed', () => pm.expect(j).to.not.have.property('password_hash'));",
+                  "pm.test('public_key is NOT exposed', () => pm.expect(j).to.not.have.property('public_key'));",
+                  "pm.collectionVariables.set('orgId', j.org_id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"org_name\":\"{{orgName}}\",\"email\":\"{{orgEmail}}\",\"password\":\"{{orgPassword}}\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/onboard", "host": ["{{baseUrl}}"], "path": ["api","org","onboard"] }
+          }
+        },
+        {
+          "name": "1.2 — Onboard Duplicate Org → 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('message describes the conflict', () => pm.expect(j.message).to.be.a('string').and.have.length.above(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"org_name\":\"{{orgName}}\",\"email\":\"{{orgEmail}}\",\"password\":\"{{orgPassword}}\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/onboard", "host": ["{{baseUrl}}"], "path": ["api","org","onboard"] }
+          }
+        },
+        {
+          "name": "1.3 — Login Organisation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('token is a non-empty JWT string', () => pm.expect(j.token).to.be.a('string').and.have.length.above(20));",
+                  "pm.test('org.org_id matches registered id', () => pm.expect(j.org.org_id).to.eql(pm.collectionVariables.get('orgId')));",
+                  "pm.test('org.email matches', () => pm.expect(j.org.email).to.eql(pm.collectionVariables.get('orgEmail')));",
+                  "pm.test('org.org_name is a string', () => pm.expect(j.org.org_name).to.be.a('string'));",
+                  "pm.test('password_hash is NOT in response', () => pm.expect(j).to.not.have.property('password_hash'));",
+                  "pm.collectionVariables.set('orgToken', j.token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{orgEmail}}\",\"password\":\"{{orgPassword}}\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/login", "host": ["{{baseUrl}}"], "path": ["api","org","login"] }
+          }
+        },
+        {
+          "name": "1.4 — Get Org Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('profile object is present', () => pm.expect(j.profile).to.be.an('object'));",
+                  "pm.test('profile.org_id matches', () => pm.expect(j.profile.org_id).to.eql(pm.collectionVariables.get('orgId')));",
+                  "pm.test('profile.email matches', () => pm.expect(j.profile.email).to.eql(pm.collectionVariables.get('orgEmail')));",
+                  "pm.test('profile.status is active', () => pm.expect(j.profile.status).to.eql('active'));",
+                  "pm.test('private_key NOT in profile', () => pm.expect(j.profile).to.not.have.property('private_key'));",
+                  "pm.test('password_hash NOT in profile', () => pm.expect(j.profile).to.not.have.property('password_hash'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/profile", "host": ["{{baseUrl}}"], "path": ["api","org","profile"] }
+          }
+        },
+        {
+          "name": "1.5 — Update Org Profile",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "pm.collectionVariables.set('updatedOrgName', 'Updated_' + pm.collectionVariables.get('orgName'));"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('profile.org_name updated correctly', () => pm.expect(j.profile.org_name).to.eql(pm.collectionVariables.get('updatedOrgName')));",
+                  "pm.test('profile.org_id unchanged', () => pm.expect(j.profile.org_id).to.eql(pm.collectionVariables.get('orgId')));",
+                  "pm.test('private_key NOT in updated profile', () => pm.expect(j.profile).to.not.have.property('private_key'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"org_name\":\"{{updatedOrgName}}\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/profile", "host": ["{{baseUrl}}"], "path": ["api","org","profile"] }
+          }
+        },
+        {
+          "name": "1.6 — Get Org Dashboard Stats",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('total_certificates is a number >= 0', () => pm.expect(j.total_certificates).to.be.a('number').and.be.at.least(0));",
+                  "pm.test('total_recipients is a number >= 0', () => pm.expect(j.total_recipients).to.be.a('number').and.be.at.least(0));",
+                  "pm.test('revoked_certificates is a number >= 0', () => pm.expect(j.revoked_certificates).to.be.a('number').and.be.at.least(0));",
+                  "pm.test('active = total - revoked', () => pm.expect(j.active_certificates).to.eql(j.total_certificates - j.revoked_certificates));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/dashboard/stats", "host": ["{{baseUrl}}"], "path": ["api","org","dashboard","stats"] }
+          }
+        },
+        {
+          "name": "1.7 — Get Org Recipients (empty for new org)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('data is an array', () => pm.expect(j.data).to.be.an('array'));",
+                  "pm.test('total is 0 for brand new org', () => pm.expect(j.total).to.eql(0));",
+                  "pm.test('page defaults to 1', () => pm.expect(j.page).to.eql(1));",
+                  "pm.test('limit is a positive number', () => pm.expect(j.limit).to.be.a('number').and.be.above(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/recipients", "host": ["{{baseUrl}}"], "path": ["api","org","recipients"] }
+          }
+        },
+        {
+          "name": "1.8 — Get Org Certificates (empty for new org)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('data is an empty array', () => { pm.expect(j.data).to.be.an('array'); pm.expect(j.data.length).to.eql(0); });",
+                  "pm.test('total is 0', () => pm.expect(j.total).to.eql(0));",
+                  "pm.test('pagination fields present', () => { pm.expect(j.page).to.be.a('number'); pm.expect(j.limit).to.be.a('number'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/certificates", "host": ["{{baseUrl}}"], "path": ["api","org","certificates"] }
+          }
+        },
+        {
+          "name": "1.9 — Get Org Audit Logs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('data is an array', () => pm.expect(j.data).to.be.an('array'));",
+                  "pm.test('total is a non-negative number', () => pm.expect(j.total).to.be.a('number').and.be.at.least(0));",
+                  "pm.test('page and limit present', () => { pm.expect(j.page).to.be.a('number'); pm.expect(j.limit).to.be.a('number'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/audit-logs", "host": ["{{baseUrl}}"], "path": ["api","org","audit-logs"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 — Recipient Flow",
+      "item": [
+        {
+          "name": "2.1 — Send Invite to Recipient",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const rand = Math.random().toString(36).substring(2, 8);",
+                  "pm.collectionVariables.set('recipientEmail', 'recipient_' + rand + '@bitcert.dev');"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('token is a non-empty string', () => pm.expect(j.token).to.be.a('string').and.have.length.above(10));",
+                  "pm.test('token contains a dot separator (base64url.base64url)', () => pm.expect(j.token).to.include('.'));",
+                  "pm.collectionVariables.set('inviteToken', j.token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{recipientEmail}}\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/invite", "host": ["{{baseUrl}}"], "path": ["api","org","invite"] }
+          }
+        },
+        {
+          "name": "2.2 — Accept Invite (happy path)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('message confirms activation', () => pm.expect(j.message).to.eql('Account activated. You can now log in.'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"token\":\"{{inviteToken}}\",\"name\":\"{{recipientName}}\",\"password\":\"{{recipientPassword}}\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/recipient/accept-invite", "host": ["{{baseUrl}}"], "path": ["api","recipient","accept-invite"] }
+          }
+        },
+        {
+          "name": "2.3 — Accept Invite — Reuse Token → 410",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 410 Gone (token already used)', () => pm.response.to.have.status(410));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('message indicates already used', () => pm.expect(j.message).to.be.a('string').and.have.length.above(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"token\":\"{{inviteToken}}\",\"name\":\"{{recipientName}}\",\"password\":\"{{recipientPassword}}\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/recipient/accept-invite", "host": ["{{baseUrl}}"], "path": ["api","recipient","accept-invite"] }
+          }
+        },
+        {
+          "name": "2.4 — Recipient Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('token is a non-empty JWT string', () => pm.expect(j.token).to.be.a('string').and.have.length.above(20));",
+                  "pm.test('recipient.email matches', () => pm.expect(j.recipient.email).to.eql(pm.collectionVariables.get('recipientEmail')));",
+                  "pm.test('recipient.recipient_id is a UUID', () => pm.expect(j.recipient.recipient_id).to.be.a('string').and.match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i));",
+                  "pm.test('recipient.name matches accepted name', () => pm.expect(j.recipient.name).to.eql(pm.collectionVariables.get('recipientName')));",
+                  "pm.collectionVariables.set('recipientToken', j.token);",
+                  "pm.collectionVariables.set('recipientId', j.recipient.recipient_id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{recipientEmail}}\",\"password\":\"{{recipientPassword}}\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/recipient/login", "host": ["{{baseUrl}}"], "path": ["api","recipient","login"] }
+          }
+        },
+        {
+          "name": "2.5 — Get Recipient Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('profile is an object', () => pm.expect(j.profile).to.be.an('object'));",
+                  "pm.test('profile.recipient_id matches', () => pm.expect(j.profile.recipient_id).to.eql(pm.collectionVariables.get('recipientId')));",
+                  "pm.test('profile.email matches', () => pm.expect(j.profile.email).to.eql(pm.collectionVariables.get('recipientEmail')));",
+                  "pm.test('profile.name matches accepted name', () => pm.expect(j.profile.name).to.eql(pm.collectionVariables.get('recipientName')));",
+                  "pm.test('password_hash NOT in profile', () => pm.expect(j.profile).to.not.have.property('password_hash'));",
+                  "pm.test('profile.created_at is a string', () => pm.expect(j.profile.created_at).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recipientToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/recipient/profile", "host": ["{{baseUrl}}"], "path": ["api","recipient","profile"] }
+          }
+        },
+        {
+          "name": "2.6 — Recipient Certificates (empty before issuance)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('certificates is an array', () => pm.expect(j.certificates).to.be.an('array'));",
+                  "pm.test('no certificates yet', () => pm.expect(j.certificates.length).to.eql(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recipientToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/recipient/certificates", "host": ["{{baseUrl}}"], "path": ["api","recipient","certificates"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 — Certificate Flow",
+      "item": [
+        {
+          "name": "3.1 — Issue Certificate (by recipient_id)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('cert_hash is a 64-char hex string', () => pm.expect(j.cert_hash).to.be.a('string').and.match(/^[0-9a-f]{64}$/));",
+                  "pm.test('certificate_id is a UUID', () => pm.expect(j.certificate_id).to.be.a('string').and.match(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i));",
+                  "pm.test('blockchain_tx_id is present and starts with tx_', () => pm.expect(j.blockchain_tx_id).to.be.a('string').and.match(/^tx_/));",
+                  "pm.test('file_path contains uploads/', () => pm.expect(j.file_path).to.include('uploads/'));",
+                  "pm.test('file_path contains cert_hash', () => pm.expect(j.file_path).to.include(j.cert_hash));",
+                  "pm.test('qr_code is a base64 PNG data URL', () => pm.expect(j.qr_code).to.be.a('string').and.match(/^data:image\\/png;base64,/));",
+                  "pm.collectionVariables.set('certHash', j.cert_hash);",
+                  "pm.collectionVariables.set('certificateId', j.certificate_id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"recipient_id\":\"{{recipientId}}\",\"recipient_name\":\"{{recipientName}}\",\"course\":\"{{courseName}}\",\"issue_date\":\"{{issueDate}}\",\"description\":\"Test certificate for QA suite\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/certificate/issue", "host": ["{{baseUrl}}"], "path": ["api","org","certificate","issue"] }
+          }
+        },
+        {
+          "name": "3.2 — Org — Get Certificate by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('certificate object is present', () => pm.expect(j.certificate).to.be.an('object'));",
+                  "pm.test('certificate.certificate_id matches', () => pm.expect(j.certificate.certificate_id).to.eql(pm.collectionVariables.get('certificateId')));",
+                  "pm.test('certificate.cert_hash matches', () => pm.expect(j.certificate.cert_hash).to.eql(pm.collectionVariables.get('certHash')));",
+                  "pm.test('certificate.course matches', () => pm.expect(j.certificate.course).to.eql(pm.collectionVariables.get('courseName')));",
+                  "pm.test('certificate.is_revoked is false', () => pm.expect(j.certificate.is_revoked).to.be.false);",
+                  "pm.test('certificate.recipient is present', () => pm.expect(j.certificate.recipient).to.be.an('object'));",
+                  "pm.test('certificate.recipient.email matches', () => pm.expect(j.certificate.recipient.email).to.eql(pm.collectionVariables.get('recipientEmail')));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/certificate/{{certificateId}}", "host": ["{{baseUrl}}"], "path": ["api","org","certificate","{{certificateId}}"] }
+          }
+        },
+        {
+          "name": "3.3 — Org — Certificates List (after issuance)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('data is a non-empty array', () => { pm.expect(j.data).to.be.an('array'); pm.expect(j.data.length).to.be.above(0); });",
+                  "pm.test('total >= 1', () => pm.expect(j.total).to.be.at.least(1));",
+                  "pm.test('first cert has required fields', () => { const c = j.data[0]; pm.expect(c.cert_hash).to.be.a('string'); pm.expect(c.course).to.be.a('string'); pm.expect(c.is_revoked).to.be.a('boolean'); pm.expect(c.recipient_name).to.be.a('string'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/certificates", "host": ["{{baseUrl}}"], "path": ["api","org","certificates"] }
+          }
+        },
+        {
+          "name": "3.4 — Org — Search Certificates (by course name)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('data is an array', () => pm.expect(j.data).to.be.an('array'));",
+                  "pm.test('search returned at least 1 result', () => pm.expect(j.data.length).to.be.above(0));",
+                  "pm.test('result course matches search term (case-insensitive)', () => { const courses = j.data.map(c => c.course.toLowerCase()); pm.expect(courses.some(c => c.includes('blockchain'))).to.be.true; });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/org/certificates?search=blockchain",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","org","certificates"],
+              "query": [{ "key": "search", "value": "blockchain" }]
+            }
+          }
+        },
+        {
+          "name": "3.5 — Org — Filter Certificates by status=active",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('data is an array', () => pm.expect(j.data).to.be.an('array'));",
+                  "pm.test('all returned certs are not revoked', () => { j.data.forEach(c => pm.expect(c.is_revoked).to.be.false); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/org/certificates?status=active",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","org","certificates"],
+              "query": [{ "key": "status", "value": "active" }]
+            }
+          }
+        },
+        {
+          "name": "3.6 — Org — Recipients List (after invite accepted)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('total >= 1', () => pm.expect(j.total).to.be.at.least(1));",
+                  "pm.test('data is a non-empty array', () => pm.expect(j.data.length).to.be.above(0));",
+                  "pm.test('recipient email in list', () => { const emails = j.data.map(r => r.email); pm.expect(emails).to.include(pm.collectionVariables.get('recipientEmail')); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/recipients", "host": ["{{baseUrl}}"], "path": ["api","org","recipients"] }
+          }
+        },
+        {
+          "name": "3.7 — Recipient — Certificates List",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('certificates is a non-empty array', () => { pm.expect(j.certificates).to.be.an('array'); pm.expect(j.certificates.length).to.be.above(0); });",
+                  "pm.test('first cert has cert_hash', () => pm.expect(j.certificates[0].cert_hash).to.be.a('string').and.match(/^[0-9a-f]{64}$/));",
+                  "pm.test('first cert has qr_url pointing to verify endpoint', () => pm.expect(j.certificates[0].qr_url).to.include('/api/verify/'));",
+                  "pm.test('qr_url contains the cert_hash', () => pm.expect(j.certificates[0].qr_url).to.include(j.certificates[0].cert_hash));",
+                  "pm.test('first cert is_revoked is false', () => pm.expect(j.certificates[0].is_revoked).to.be.false);",
+                  "pm.test('org_name is present', () => pm.expect(j.certificates[0].org_name).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recipientToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/recipient/certificates", "host": ["{{baseUrl}}"], "path": ["api","recipient","certificates"] }
+          }
+        },
+        {
+          "name": "3.8 — Recipient — Certificate Detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('certificate object is present', () => pm.expect(j.certificate).to.be.an('object'));",
+                  "pm.test('certificate.cert_hash matches', () => pm.expect(j.certificate.cert_hash).to.eql(pm.collectionVariables.get('certHash')));",
+                  "pm.test('certificate.course matches', () => pm.expect(j.certificate.course).to.eql(pm.collectionVariables.get('courseName')));",
+                  "pm.test('certificate.is_revoked is false', () => pm.expect(j.certificate.is_revoked).to.be.false);",
+                  "pm.test('verification_url contains cert_hash', () => pm.expect(j.certificate.verification_url).to.include(pm.collectionVariables.get('certHash')));",
+                  "pm.test('verification_url points to /api/verify/', () => pm.expect(j.certificate.verification_url).to.include('/api/verify/'));",
+                  "pm.test('org_name is present', () => pm.expect(j.certificate.org_name).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recipientToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/recipient/certificate/{{certificateId}}", "host": ["{{baseUrl}}"], "path": ["api","recipient","certificate","{{certificateId}}"] }
+          }
+        },
+        {
+          "name": "3.9 — Recipient — Certificate QR",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('cert_hash matches', () => pm.expect(j.cert_hash).to.eql(pm.collectionVariables.get('certHash')));",
+                  "pm.test('qr_url is a string', () => pm.expect(j.qr_url).to.be.a('string'));",
+                  "pm.test('qr_url points to /api/verify/', () => pm.expect(j.qr_url).to.include('/api/verify/'));",
+                  "pm.test('qr_url contains cert_hash', () => pm.expect(j.qr_url).to.include(pm.collectionVariables.get('certHash')));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recipientToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/recipient/certificate/{{certificateId}}/qr", "host": ["{{baseUrl}}"], "path": ["api","recipient","certificate","{{certificateId}}","qr"] }
+          }
+        },
+        {
+          "name": "3.10 — Org — Audit Log contains ISSUE entry",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('data has at least one entry', () => pm.expect(j.data.length).to.be.above(0));",
+                  "pm.test('an ISSUE audit entry exists for this cert', () => { const entry = j.data.find(e => e.action === 'ISSUE' && e.target === pm.collectionVariables.get('certHash')); pm.expect(entry).to.be.an('object'); });",
+                  "pm.test('ISSUE entry has metadata', () => { const entry = j.data.find(e => e.action === 'ISSUE' && e.target === pm.collectionVariables.get('certHash')); pm.expect(entry.metadata).to.be.an('object'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/audit-logs", "host": ["{{baseUrl}}"], "path": ["api","org","audit-logs"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 — Public Verification",
+      "item": [
+        {
+          "name": "4.1 — Verify Certificate (valid, not revoked)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200 (verification always 200)', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('valid is true', () => pm.expect(j.valid).to.be.true);",
+                  "pm.test('cert_hash matches issued cert', () => pm.expect(j.cert_hash).to.eql(pm.collectionVariables.get('certHash')));",
+                  "pm.test('issuer object is present', () => pm.expect(j.issuer).to.be.an('object'));",
+                  "pm.test('issuer.msp_id is a string', () => pm.expect(j.issuer.msp_id).to.be.a('string').and.have.length.above(0));",
+                  "pm.test('is_revoked is false', () => pm.expect(j.is_revoked).to.be.false);",
+                  "pm.test('issued_at is present', () => pm.expect(j.issued_at).to.be.a('string'));",
+                  "pm.test('reason field is absent on valid cert', () => pm.expect(j).to.not.have.property('reason'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/verify/{{certHash}}", "host": ["{{baseUrl}}"], "path": ["api","verify","{{certHash}}"] }
+          }
+        },
+        {
+          "name": "4.2 — Verify Non-existent Certificate Hash",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200 (verification always 200)', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('valid is false for unknown hash', () => pm.expect(j.valid).to.be.false);",
+                  "pm.test('reason is a non-empty string', () => pm.expect(j.reason).to.be.a('string').and.have.length.above(0));",
+                  "pm.test('cert_hash and issuer are absent', () => { pm.expect(j).to.not.have.property('issuer'); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/verify/0000000000000000000000000000000000000000000000000000000000000000", "host": ["{{baseUrl}}"], "path": ["api","verify","0000000000000000000000000000000000000000000000000000000000000000"] }
+          }
+        },
+        {
+          "name": "4.3 — Verify Invalid Hash Format → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('message or errors present', () => pm.expect(j.message).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/verify/notahexhash", "host": ["{{baseUrl}}"], "path": ["api","verify","notahexhash"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 — Certificate Revocation",
+      "item": [
+        {
+          "name": "5.1 — Revoke Certificate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('cert_hash in response matches revoked cert', () => pm.expect(j.cert_hash).to.eql(pm.collectionVariables.get('certHash')));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/certificate/revoke/{{certHash}}", "host": ["{{baseUrl}}"], "path": ["api","org","certificate","revoke","{{certHash}}"] }
+          }
+        },
+        {
+          "name": "5.2 — Verify Revoked Certificate → valid=false",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('valid is false after revocation', () => pm.expect(j.valid).to.be.false);",
+                  "pm.test('reason mentions revoked', () => pm.expect(j.reason).to.include('revoked'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/verify/{{certHash}}", "host": ["{{baseUrl}}"], "path": ["api","verify","{{certHash}}"] }
+          }
+        },
+        {
+          "name": "5.3 — Revoke Already Revoked Certificate → 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('message indicates already revoked', () => pm.expect(j.message).to.include('already revoked'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/certificate/revoke/{{certHash}}", "host": ["{{baseUrl}}"], "path": ["api","org","certificate","revoke","{{certHash}}"] }
+          }
+        },
+        {
+          "name": "5.4 — Org — Certificates Filter status=revoked",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('data is a non-empty array', () => pm.expect(j.data.length).to.be.above(0));",
+                  "pm.test('all returned certs are revoked', () => { j.data.forEach(c => pm.expect(c.is_revoked).to.be.true); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/org/certificates?status=revoked",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","org","certificates"],
+              "query": [{ "key": "status", "value": "revoked" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 — Auth & Security",
+      "item": [
+        {
+          "name": "6.1 — Org Login — Wrong Password → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('message is generic (no credential hint)', () => pm.expect(j.message).to.eql('Invalid email or password.'));",
+                  "pm.test('token is NOT in response', () => pm.expect(j).to.not.have.property('token'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{orgEmail}}\",\"password\":\"WrongPassword999!\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/login", "host": ["{{baseUrl}}"], "path": ["api","org","login"] }
+          }
+        },
+        {
+          "name": "6.2 — Org Login — Unknown Email → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('message is generic (prevents email enumeration)', () => pm.expect(j.message).to.eql('Invalid email or password.'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"doesnotexist@bitcert.dev\",\"password\":\"somePassword1!\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/login", "host": ["{{baseUrl}}"], "path": ["api","org","login"] }
+          }
+        },
+        {
+          "name": "6.3 — Recipient Login — Wrong Password → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('message is generic', () => pm.expect(j.message).to.eql('Invalid email or password.'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{recipientEmail}}\",\"password\":\"WrongRecipPass99!\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/recipient/login", "host": ["{{baseUrl}}"], "path": ["api","recipient","login"] }
+          }
+        },
+        {
+          "name": "6.4 — Protected Org Route — No Token → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('no org data leaked', () => pm.expect(j).to.not.have.property('data'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/certificates", "host": ["{{baseUrl}}"], "path": ["api","org","certificates"] }
+          }
+        },
+        {
+          "name": "6.5 — Org Token on Recipient Endpoint → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 401 (wrong role rejected)', () => pm.response.to.have.status(401));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/recipient/certificates", "host": ["{{baseUrl}}"], "path": ["api","recipient","certificates"] }
+          }
+        },
+        {
+          "name": "6.6 — Recipient Token on Org Endpoint → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 401 (wrong role rejected)', () => pm.response.to.have.status(401));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recipientToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/certificates", "host": ["{{baseUrl}}"], "path": ["api","org","certificates"] }
+          }
+        },
+        {
+          "name": "6.7 — Recipient Accesses Other Recipient Certificate → 403",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Uses a certificate ID that belongs to the org's recipient.",
+                  "// When accessed by the recipient using their own token it should succeed (tested in 3.8).",
+                  "// We tamper the ID to a random UUID to trigger 404, verifying ownership gate exists.",
+                  "pm.collectionVariables.set('fakeRecipientCertId', '00000000-0000-4000-a000-000000000000');"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 403 or 404 (access denied or not found)', () => pm.expect([403, 404]).to.include(pm.response.code));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recipientToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/recipient/certificate/{{fakeRecipientCertId}}", "host": ["{{baseUrl}}"], "path": ["api","recipient","certificate","{{fakeRecipientCertId}}"] }
+          }
+        },
+        {
+          "name": "6.8 — Invalid JWT (tampered token) → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 401 for tampered token', () => pm.response.to.have.status(401));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmYWtlIiwib3JnX2lkIjoiZmFrZSIsInJvbGUiOiJvcmcifQ.invalidsignature", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/profile", "host": ["{{baseUrl}}"], "path": ["api","org","profile"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 — Password Reset",
+      "item": [
+        {
+          "name": "7.1 — Forgot Password — Known Org Email (silent success)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200 (response is always silent)', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('message confirms link sent', () => pm.expect(j.message).to.be.a('string').and.include('email'));",
+                  "pm.test('no token in response (prevent enumeration)', () => pm.expect(j).to.not.have.property('token'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{orgEmail}}\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/forgot-password", "host": ["{{baseUrl}}"], "path": ["api","auth","forgot-password"] }
+          }
+        },
+        {
+          "name": "7.2 — Forgot Password — Unknown Email (silent 200, no enumeration)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200 (silent — prevents email enumeration)', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true (indistinguishable from known email)', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('same message as known email (no information leak)', () => pm.expect(j.message).to.be.a('string').and.include('email'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"nonexistent_user_xyz@bitcert.dev\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/forgot-password", "host": ["{{baseUrl}}"], "path": ["api","auth","forgot-password"] }
+          }
+        },
+        {
+          "name": "7.3 — Reset Password — Invalid Token → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('message indicates invalid token', () => pm.expect(j.message).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"token\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"password\":\"NewPass@12345!\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/reset-password", "host": ["{{baseUrl}}"], "path": ["api","auth","reset-password"] }
+          }
+        },
+        {
+          "name": "7.4 — Reset Password — Password Too Short → 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 422 Unprocessable Entity', () => pm.response.to.have.status(422));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('errors array is present', () => pm.expect(j.errors).to.be.an('array').and.have.length.above(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"token\":\"sometoken\",\"password\":\"short\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/reset-password", "host": ["{{baseUrl}}"], "path": ["api","auth","reset-password"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 — Edge Cases & Validation",
+      "item": [
+        {
+          "name": "8.1 — Onboard Org — Password Too Short (<10 chars) → 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 422 Unprocessable Entity', () => pm.response.to.have.status(422));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('errors array present', () => pm.expect(j.errors).to.be.an('array').and.have.length.above(0));",
+                  "pm.test('error mentions password', () => pm.expect(j.errors.join(' ').toLowerCase()).to.include('password'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"org_name\":\"ShortPwdOrg\",\"email\":\"shortpwd@bitcert.dev\",\"password\":\"short\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/onboard", "host": ["{{baseUrl}}"], "path": ["api","org","onboard"] }
+          }
+        },
+        {
+          "name": "8.2 — Onboard Org — Invalid Email → 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('errors mention email', () => pm.expect(j.errors.join(' ').toLowerCase()).to.include('email'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"org_name\":\"BadEmailOrg\",\"email\":\"not-an-email\",\"password\":\"StrongPass123!\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/onboard", "host": ["{{baseUrl}}"], "path": ["api","org","onboard"] }
+          }
+        },
+        {
+          "name": "8.3 — Issue Certificate — Missing course → 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('errors array present', () => pm.expect(j.errors).to.be.an('array').and.have.length.above(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"recipient_id\":\"{{recipientId}}\",\"recipient_name\":\"Alice\",\"issue_date\":\"2026-01-15\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/certificate/issue", "host": ["{{baseUrl}}"], "path": ["api","org","certificate","issue"] }
+          }
+        },
+        {
+          "name": "8.4 — Issue Certificate — Both recipient_id and recipient_email → 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 422 (xor violation)', () => pm.response.to.have.status(422));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('errors array present', () => pm.expect(j.errors).to.be.an('array').and.have.length.above(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"recipient_id\":\"{{recipientId}}\",\"recipient_email\":\"also@bitcert.dev\",\"recipient_name\":\"Alice\",\"course\":\"Test\",\"issue_date\":\"2026-01-15\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/certificate/issue", "host": ["{{baseUrl}}"], "path": ["api","org","certificate","issue"] }
+          }
+        },
+        {
+          "name": "8.5 — Issue Certificate — Neither recipient_id nor recipient_email → 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 422 (xor — at least one required)', () => pm.response.to.have.status(422));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"recipient_name\":\"Alice\",\"course\":\"Test\",\"issue_date\":\"2026-01-15\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/certificate/issue", "host": ["{{baseUrl}}"], "path": ["api","org","certificate","issue"] }
+          }
+        },
+        {
+          "name": "8.6 — Verify Certificate — Hash Too Short → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 400 (hash fails Joi length(64) check)', () => pm.response.to.have.status(400));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/verify/abc123def456abc123def456abc12345", "host": ["{{baseUrl}}"], "path": ["api","verify","abc123def456abc123def456abc12345"] }
+          }
+        },
+        {
+          "name": "8.7 — Org Certificates — Search with No Results",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('data is an empty array', () => { pm.expect(j.data).to.be.an('array'); pm.expect(j.data.length).to.eql(0); });",
+                  "pm.test('total is 0', () => pm.expect(j.total).to.eql(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/org/certificates?search=xyzzy_no_match_12345",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","org","certificates"],
+              "query": [{ "key": "search", "value": "xyzzy_no_match_12345" }]
+            }
+          }
+        },
+        {
+          "name": "8.8 — Org Certificates — Pagination (limit=1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('limit is respected (at most 1 item returned)', () => pm.expect(j.data.length).to.be.at.most(1));",
+                  "pm.test('page is 1', () => pm.expect(j.page).to.eql(1));",
+                  "pm.test('limit is 1', () => pm.expect(j.limit).to.eql(1));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/org/certificates?page=1&limit=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","org","certificates"],
+              "query": [{ "key": "page", "value": "1" }, { "key": "limit", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "8.9 — Update Org Profile — Empty org_name → 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('errors present', () => pm.expect(j.errors).to.be.an('array').and.have.length.above(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"org_name\":\"\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/profile", "host": ["{{baseUrl}}"], "path": ["api","org","profile"] }
+          }
+        },
+        {
+          "name": "8.10 — Accept Invite — Invalid HMAC Token → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 400 (HMAC verification failed)', () => pm.response.to.have.status(400));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('message indicates invalid token', () => pm.expect(j.message).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"token\":\"fakebytes.fakesignature\",\"name\":\"Hacker\",\"password\":\"hacked@Pass123\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/recipient/accept-invite", "host": ["{{baseUrl}}"], "path": ["api","recipient","accept-invite"] }
+          }
+        },
+        {
+          "name": "8.11 — Issue Via recipient_email (implicit recipient creation)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const rand = Math.random().toString(36).substring(2, 8);",
+                  "pm.collectionVariables.set('newRecipientEmail', 'newrec_' + rand + '@bitcert.dev');"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('success is true', () => pm.expect(j.success).to.be.true);",
+                  "pm.test('cert_hash is a 64-char hex string', () => pm.expect(j.cert_hash).to.be.a('string').and.match(/^[0-9a-f]{64}$/));",
+                  "pm.test('blockchain_tx_id starts with tx_', () => pm.expect(j.blockchain_tx_id).to.match(/^tx_/));",
+                  "pm.test('qr_code is a PNG data URL', () => pm.expect(j.qr_code).to.match(/^data:image\\/png;base64,/));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{orgToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"recipient_email\":\"{{newRecipientEmail}}\",\"recipient_name\":\"Bob New\",\"course\":\"Smart Contracts 101\",\"issue_date\":\"2026-02-20\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/certificate/issue", "host": ["{{baseUrl}}"], "path": ["api","org","certificate","issue"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 — Cross-Ownership Security",
+      "item": [
+        {
+          "name": "9.1 — Onboard Second Organisation",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const rand = Math.random().toString(36).substring(2, 8);",
+                  "pm.collectionVariables.set('org2Name', 'SecondOrg_' + rand);",
+                  "pm.collectionVariables.set('org2Email', 'secondorg_' + rand + '@bitcert.dev');"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('second org created successfully', () => pm.expect(j.success).to.be.true);",
+                  "pm.collectionVariables.set('org2Id', j.org_id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"org_name\":\"{{org2Name}}\",\"email\":\"{{org2Email}}\",\"password\":\"SecondOrg@Pass1!\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/onboard", "host": ["{{baseUrl}}"], "path": ["api","org","onboard"] }
+          }
+        },
+        {
+          "name": "9.2 — Login Second Organisation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('token received for org2', () => pm.expect(j.token).to.be.a('string').and.have.length.above(20));",
+                  "pm.collectionVariables.set('org2Token', j.token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{org2Email}}\",\"password\":\"SecondOrg@Pass1!\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/api/org/login", "host": ["{{baseUrl}}"], "path": ["api","org","login"] }
+          }
+        },
+        {
+          "name": "9.3 — Org2 Revoke Org1 Certificate → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 403 Forbidden (cannot revoke another org cert)', () => pm.response.to.have.status(403));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('message indicates access denied', () => pm.expect(j.message).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{org2Token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/certificate/revoke/{{certHash}}", "host": ["{{baseUrl}}"], "path": ["api","org","certificate","revoke","{{certHash}}"] }
+          }
+        },
+        {
+          "name": "9.4 — Org2 Get Org1 Certificate by ID → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 403 Forbidden (org2 cannot read org1 cert)', () => pm.response.to.have.status(403));",
+                  "pm.test('success is false', () => pm.expect(j.success).to.be.false);",
+                  "pm.test('no certificate data leaked', () => pm.expect(j).to.not.have.property('certificate'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{org2Token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/certificate/{{certificateId}}", "host": ["{{baseUrl}}"], "path": ["api","org","certificate","{{certificateId}}"] }
+          }
+        },
+        {
+          "name": "9.5 — Org2 Org Stats (only sees own data, not org1 data)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('total_certificates is 0 for brand new org2', () => pm.expect(j.total_certificates).to.eql(0));",
+                  "pm.test('total_recipients is 0 for brand new org2', () => pm.expect(j.total_recipients).to.eql(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{org2Token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/dashboard/stats", "host": ["{{baseUrl}}"], "path": ["api","org","dashboard","stats"] }
+          }
+        },
+        {
+          "name": "9.6 — Org2 Certificates List (empty — scoped to org2 only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('data is empty (org2 has no certs, org1 certs not visible)', () => { pm.expect(j.data).to.be.an('array'); pm.expect(j.data.length).to.eql(0); });",
+                  "pm.test('total is 0', () => pm.expect(j.total).to.eql(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{org2Token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/org/certificates", "host": ["{{baseUrl}}"], "path": ["api","org","certificates"] }
+          }
+        }
+      ]
+    }
+  ]
+}

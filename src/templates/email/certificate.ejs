@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your certificate is ready</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f5f5f5; font-family: Arial, sans-serif; color: #1a1a1a; }
+    .wrapper { padding: 40px 16px; }
+    .container { background-color: #ffffff; max-width: 600px; margin: 0 auto; border-radius: 6px; border: 1px solid #e0e0e0; overflow: hidden; }
+    .body { padding: 40px 40px 32px; }
+    h1 { font-size: 22px; font-weight: 700; margin: 0 0 16px; color: #111111; }
+    p { font-size: 15px; line-height: 1.6; margin: 0 0 24px; color: #444444; }
+    .btn { display: inline-block; background-color: #111111; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 600; padding: 12px 24px; border-radius: 5px; }
+    .footer { padding: 20px 40px; border-top: 1px solid #eeeeee; }
+    .footer p { font-size: 12px; color: #999999; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container">
+      <div class="body">
+        <h1>Your certificate is ready</h1>
+        <p>Hi <strong><%= recipientName %></strong>,</p>
+        <p>Your certificate has been issued by <strong><%= orgName %></strong> and recorded on the blockchain.</p>
+        <p>You can verify the authenticity of your certificate at any time using the link below.</p>
+        <a href="<%= verificationUrl %>" class="btn">Verify Certificate</a>
+      </div>
+      <div class="footer">
+        <p>If you have any questions, please contact the issuing organisation directly.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -4,7 +4,7 @@ const jwt             = require('jsonwebtoken');
 const { StatusCodes } = require('http-status-codes');
 const prisma          = require('../database/prismaClient');
 
-async function requireAuth(req, res, next) {
+async function requireRecipientAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization ?? '';
     if (!authHeader.startsWith('Bearer ')) {
@@ -18,7 +18,7 @@ async function requireAuth(req, res, next) {
 
     let payload;
     try {
-      payload = jwt.verify(token, process.env.JWT_SECRET);
+      payload = jwt.verify(token, process.env.RECIPIENT_JWT_SECRET);
     } catch {
       return res.status(StatusCodes.UNAUTHORIZED).json({
         success: false,
@@ -26,30 +26,30 @@ async function requireAuth(req, res, next) {
       });
     }
 
-    if (payload.role !== undefined && payload.role !== 'org') {
+    if (payload.role !== 'recipient') {
       return res.status(StatusCodes.FORBIDDEN).json({
         success: false,
         message: 'Access denied.',
       });
     }
 
-    const org = await prisma.organisation.findUnique({
-      where:  { org_id: payload.org_id },
-      select: { org_id: true, msp_id: true, org_name: true, email: true, status: true },
+    const recipient = await prisma.recipient.findUnique({
+      where:  { recipient_id: payload.recipient_id },
+      select: { recipient_id: true, email: true, name: true },
     });
 
-    if (!org || org.status === 'revoked') {
+    if (!recipient) {
       return res.status(StatusCodes.FORBIDDEN).json({
         success: false,
-        message: 'Organisation not found or has been revoked.',
+        message: 'Recipient not found.',
       });
     }
 
-    req.org = org;
+    req.recipient = recipient;
     next();
   } catch (err) {
     next(err);
   }
 }
 
-module.exports = { requireAuth };
+module.exports = { requireRecipientAuth };

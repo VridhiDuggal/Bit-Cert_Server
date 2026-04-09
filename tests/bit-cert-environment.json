@@ -1,0 +1,50 @@
+{
+  "id": "bit-cert-test-env",
+  "name": "Bit-Cert — Test Environment",
+  "_postman_variable_scope": "environment",
+  "values": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "default",
+      "enabled": true,
+      "description": "Backend base URL. Change to match your dev server."
+    },
+    {
+      "key": "orgPassword",
+      "value": "TestOrg@Secure1!",
+      "type": "default",
+      "enabled": true,
+      "description": "Default password used when onboarding the test org (min 10 chars)."
+    },
+    {
+      "key": "recipientPassword",
+      "value": "Recip@Pass123!",
+      "type": "default",
+      "enabled": true,
+      "description": "Password set when accepting the invite (min 8 chars)."
+    },
+    {
+      "key": "recipientName",
+      "value": "Alice Tester",
+      "type": "default",
+      "enabled": true,
+      "description": "Display name used when accepting the recipient invite."
+    },
+    {
+      "key": "courseName",
+      "value": "Blockchain Development",
+      "type": "default",
+      "enabled": true,
+      "description": "Course name used when issuing a test certificate."
+    },
+    {
+      "key": "issueDate",
+      "value": "2026-01-15",
+      "type": "default",
+      "enabled": true,
+      "description": "ISO date string for certificate issue_date."
+    }
+  ],
+  "_exporter_id": "bit-cert-qa"
+}
