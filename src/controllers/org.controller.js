@@ -1,11 +1,13 @@
 'use strict';
 
 const Joi             = require('joi');
+const bcrypt          = require('bcryptjs');
 const { StatusCodes } = require('http-status-codes');
 const { onboardOrg, loginOrg, getOrgRecipients, getOrgCertificates, getOrgStats, getOrgAuditLogs, getCertificateById, getOrgProfile, updateOrgProfile } = require('../services/org.service');
 const { revokeCertificate } = require('../services/certificate.service');
 const { generateInviteToken } = require('../services/invite.service');
 const { sendInviteEmail } = require('../services/mail.service');
+const prisma = require('../database/prismaClient');
 
 const onboardSchema = Joi.object({
   org_name: Joi.string().trim().max(120).required(),
@@ -124,9 +126,36 @@ async function getOrgStatsController(req, res, next) {
   }
 }
 
+const revokeSchema = Joi.object({
+  password: Joi.string().required(),
+});
+
 async function revokeCertificateController(req, res, next) {
   try {
     const { hash: cert_hash } = req.params;
+
+    const { error, value } = revokeSchema.validate(req.body, { abortEarly: false });
+    if (error) {
+      return res.status(StatusCodes.UNPROCESSABLE_ENTITY).json({
+        success: false,
+        message: 'Validation failed.',
+        errors:  error.details.map(d => d.message),
+      });
+    }
+
+    const orgRecord = await prisma.organisation.findUnique({
+      where:  { org_id: req.org.org_id },
+      select: { password_hash: true },
+    });
+
+    const valid = await bcrypt.compare(value.password, orgRecord.password_hash);
+    if (!valid) {
+      return res.status(StatusCodes.UNAUTHORIZED).json({
+        success: false,
+        message: 'Incorrect password.',
+      });
+    }
+
     const result = await revokeCertificate(req.org.org_id, cert_hash);
     return res.status(StatusCodes.OK).json({ success: true, ...result });
   } catch (err) {
@@ -218,4 +247,45 @@ async function updateOrgProfileController(req, res, next) {
   }
 }
 
-module.exports = { onboardOrgController, loginOrgController, getOrgRecipientsController, getOrgCertificatesController, getOrgStatsController, revokeCertificateController, getOrgAuditLogsController, inviteRecipientController, getCertificateByIdController, getOrgProfileController, updateOrgProfileController };
+const changePasswordSchema = Joi.object({
+  currentPassword: Joi.string().required(),
+  newPassword:     Joi.string().min(10).required(),
+});
+
+async function changePasswordController(req, res, next) {
+  try {
+    const { error, value } = changePasswordSchema.validate(req.body, { abortEarly: false });
+    if (error) {
+      return res.status(StatusCodes.UNPROCESSABLE_ENTITY).json({
+        success: false,
+        message: 'Validation failed.',
+        errors:  error.details.map(d => d.message),
+      });
+    }
+
+    const orgRecord = await prisma.organisation.findUnique({
+      where:  { org_id: req.org.org_id },
+      select: { password_hash: true },
+    });
+
+    const valid = await bcrypt.compare(value.currentPassword, orgRecord.password_hash);
+    if (!valid) {
+      return res.status(StatusCodes.UNAUTHORIZED).json({
+        success: false,
+        message: 'Current password is incorrect.',
+      });
+    }
+
+    const newHash = await bcrypt.hash(value.newPassword, 12);
+    await prisma.organisation.update({
+      where: { org_id: req.org.org_id },
+      data:  { password_hash: newHash },
+    });
+
+    return res.status(StatusCodes.OK).json({ success: true, message: 'Password updated successfully.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { onboardOrgController, loginOrgController, getOrgRecipientsController, getOrgCertificatesController, getOrgStatsController, revokeCertificateController, getOrgAuditLogsController, inviteRecipientController, getCertificateByIdController, getOrgProfileController, updateOrgProfileController, changePasswordController };
