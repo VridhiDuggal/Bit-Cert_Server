@@ -85,4 +85,48 @@ async function markTokenUsed(token_hash) {
   });
 }
 
-module.exports = { generateInviteToken, validateInviteToken, markTokenUsed };
+async function previewInvite({ token }) {
+  const parts = token.split('.');
+  if (parts.length !== 2) {
+    throw Object.assign(new Error('Invalid invite token.'), { statusCode: 400 });
+  }
+
+  const [rawB64, sigB64] = parts;
+
+  let rawBuf;
+  try {
+    rawBuf = Buffer.from(rawB64.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  } catch {
+    throw Object.assign(new Error('Invalid invite token.'), { statusCode: 400 });
+  }
+
+  const expectedSig = hmacSign(rawBuf);
+  const receivedSig = Buffer.from(sigB64.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+
+  if (
+    expectedSig.length !== receivedSig.length ||
+    !crypto.timingSafeEqual(expectedSig, receivedSig)
+  ) {
+    throw Object.assign(new Error('Invalid invite token.'), { statusCode: 400 });
+  }
+
+  const token_hash = sha256Hex(token);
+  const invite = await prisma.inviteToken.findUnique({ where: { token_hash } });
+
+  if (!invite) throw Object.assign(new Error('Invite token not found.'), { statusCode: 400 });
+  if (invite.used_at) throw Object.assign(new Error('Invite has already been accepted.'), { statusCode: 400 });
+  if (new Date() > invite.expires_at) throw Object.assign(new Error('Invite token has expired.'), { statusCode: 400 });
+
+  const org = await prisma.organisation.findUnique({
+    where:  { org_id: invite.org_id },
+    select: { org_name: true },
+  });
+
+  return {
+    org_name:        org?.org_name ?? null,
+    recipient_email: invite.recipient_email,
+    expires_at:      invite.expires_at,
+  };
+}
+
+module.exports = { generateInviteToken, validateInviteToken, markTokenUsed, previewInvite };

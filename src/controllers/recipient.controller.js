@@ -3,8 +3,8 @@
 const Joi             = require('joi');
 const bcrypt          = require('bcryptjs');
 const { StatusCodes } = require('http-status-codes');
-const { createRecipient, loginRecipient, getRecipientCertificates, getCertificateQR, getMyCertificateById, getRecipientProfile } = require('../services/recipient.service');
-const { validateInviteToken, markTokenUsed } = require('../services/invite.service');
+const { createRecipient, loginRecipient, getRecipientCertificates, getCertificateQR, getMyCertificateById, getRecipientProfile, getRecipientDashboardStats, getVerificationHistory, updateRecipientProfile, changeRecipientPassword } = require('../services/recipient.service');
+const { validateInviteToken, markTokenUsed, previewInvite } = require('../services/invite.service');
 const prisma = require('../database/prismaClient');
 
 const createSchema = Joi.object({
@@ -60,6 +60,8 @@ async function loginRecipientController(req, res, next) {
 }
 
 const certFilterSchema = Joi.object({
+  page:      Joi.number().integer().min(1).default(1),
+  limit:     Joi.number().integer().min(1).max(50).default(12),
   search:    Joi.string().optional(),
   status:    Joi.string().valid('active', 'revoked').optional(),
   from_date: Joi.date().optional(),
@@ -77,8 +79,8 @@ async function getMyCertificatesController(req, res, next) {
       });
     }
 
-    const certificates = await getRecipientCertificates(req.recipient.recipient_id, value);
-    return res.status(StatusCodes.OK).json({ success: true, certificates });
+    const result = await getRecipientCertificates(req.recipient.recipient_id, value);
+    return res.status(StatusCodes.OK).json({ success: true, ...result });
   } catch (err) {
     next(err);
   }
@@ -155,4 +157,70 @@ async function getRecipientProfileController(req, res, next) {
   }
 }
 
-module.exports = { createRecipientController, loginRecipientController, getMyCertificatesController, getCertificateQRController, acceptInviteController, getMyCertificateByIdController, getRecipientProfileController };
+async function getDashboardStats(req, res, next) {
+  try {
+    const stats = await getRecipientDashboardStats({ recipient_id: req.recipient.recipient_id });
+    return res.status(StatusCodes.OK).json({ success: true, ...stats });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getVerificationHistoryController(req, res, next) {
+  try {
+    const result = await getVerificationHistory({ certificate_id: req.params.id, recipient_id: req.recipient.recipient_id });
+    return res.status(StatusCodes.OK).json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const updateProfileSchema = Joi.object({
+  name: Joi.string().min(2).max(120).required(),
+});
+
+async function updateProfileController(req, res, next) {
+  try {
+    const { error, value } = updateProfileSchema.validate(req.body, { abortEarly: false });
+    if (error) {
+      return res.status(StatusCodes.UNPROCESSABLE_ENTITY).json({ success: false, message: 'Validation failed.', errors: error.details.map(d => d.message) });
+    }
+    const recipient = await updateRecipientProfile({ recipient_id: req.recipient.recipient_id, name: value.name });
+    return res.status(StatusCodes.OK).json({ success: true, recipient });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const changePasswordSchema = Joi.object({
+  current_password: Joi.string().required(),
+  new_password:     Joi.string().min(10).required(),
+});
+
+async function changePasswordController(req, res, next) {
+  try {
+    const { error, value } = changePasswordSchema.validate(req.body, { abortEarly: false });
+    if (error) {
+      return res.status(StatusCodes.UNPROCESSABLE_ENTITY).json({ success: false, message: 'Validation failed.', errors: error.details.map(d => d.message) });
+    }
+    const result = await changeRecipientPassword({ recipient_id: req.recipient.recipient_id, current_password: value.current_password, new_password: value.new_password });
+    return res.status(StatusCodes.OK).json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function previewInviteController(req, res, next) {
+  try {
+    const { token } = req.query;
+    if (!token) {
+      return res.status(StatusCodes.BAD_REQUEST).json({ success: false, message: 'token query param is required.' });
+    }
+    const result = await previewInvite({ token });
+    return res.status(StatusCodes.OK).json({ success: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { createRecipientController, loginRecipientController, getMyCertificatesController, getCertificateQRController, acceptInviteController, getMyCertificateByIdController, getRecipientProfileController, getDashboardStats, getVerificationHistoryController, updateProfileController, changePasswordController, previewInviteController };

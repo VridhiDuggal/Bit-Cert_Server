@@ -8,8 +8,10 @@ const { createRecipient } = require('./recipient.service');
 const { logAuditEvent }  = require('./auditLog.service');
 const { generateCertificatePDF } = require('./pdf.service');
 const { decrypt } = require('../utils/encryption.util');
+const { sendCertificateIssuedEmail } = require('./mail.service');
+const { createNotification } = require('./notification.service');
 
-async function issueCertificate({ org, recipient_id, recipient_email, recipient_name, course, description, issue_date }) {
+async function issueCertificate({ org, recipient_id, recipient_email, recipient_name, course, description, issue_date, tags, expiry_date }) {
   let resolvedRecipientId = recipient_id;
 
   if (recipient_email) {
@@ -63,6 +65,8 @@ async function issueCertificate({ org, recipient_id, recipient_email, recipient_
         recipient_name,
         course,
         description:     description ?? null,
+        tags:            tags ?? [],
+        expiry_date:     expiry_date ? new Date(expiry_date) : null,
         issue_date:      new Date(issue_date),
         issued_by:       orgRecord.org_name,
       },
@@ -91,6 +95,20 @@ async function issueCertificate({ org, recipient_id, recipient_email, recipient_
 
   await logAuditEvent({ org_id: org.org_id, action: 'ISSUE', target: cert_hash, metadata: { recipient_email, course } });
 
+  createNotification({
+    recipient_id: resolvedRecipientId,
+    type: 'CERTIFICATE_ISSUED',
+    title: 'New certificate issued',
+    body: `${orgRecord.org_name} has issued you a certificate for ${course}.`,
+    cert_hash,
+  }).catch(() => {});
+
+  const recipientRecord = await prisma.recipient.findUnique({ where: { recipient_id: resolvedRecipientId }, select: { email: true } });
+  if (recipientRecord?.email) {
+    const verificationUrl = `${process.env.VERIFICATION_BASE_URL ?? 'http://localhost:8000'}/api/verify/${cert_hash}`;
+    sendCertificateIssuedEmail(recipientRecord.email, recipient_name, orgRecord.org_name, cert_hash, verificationUrl).catch(() => {});
+  }
+
   console.info(`[CERT] Issued successfully — cert_id: ${certificate.certificate_id}, hash: ${cert_hash}`);
 
   return {
@@ -102,10 +120,49 @@ async function issueCertificate({ org, recipient_id, recipient_email, recipient_
   };
 }
 
+async function getVerificationHistory(org_id, certificate_id, page, limit) {
+  const cert = await prisma.certificate.findUnique({ where: { certificate_id } });
+  if (!cert) throw Object.assign(new Error('Certificate not found.'), { statusCode: 404 });
+  if (cert.org_id !== org_id) throw Object.assign(new Error('Access denied.'), { statusCode: 403 });
+
+  const skip = (page - 1) * limit;
+  const [logs, total] = await Promise.all([
+    prisma.verificationLog.findMany({
+      where:   { certificate_id },
+      orderBy: { verified_at: 'desc' },
+      skip,
+      take: limit,
+      select: { log_id: true, verified_at: true, verifier_ip: true, result: true },
+    }),
+    prisma.verificationLog.count({ where: { certificate_id } }),
+  ]);
+
+  return { logs, total, page, limit };
+}
+
+async function resendCertificateEmail(org_id, certificate_id) {
+  const cert = await prisma.certificate.findUnique({
+    where:   { certificate_id },
+    include: { recipient: { select: { email: true } }, organisation: { select: { org_name: true } } },
+  });
+  if (!cert) throw Object.assign(new Error('Certificate not found.'), { statusCode: 404 });
+  if (cert.org_id !== org_id) throw Object.assign(new Error('Access denied.'), { statusCode: 403 });
+
+  const verificationUrl = `${process.env.VERIFICATION_BASE_URL ?? 'http://localhost:8000'}/api/verify/${cert.cert_hash}`;
+  await sendCertificateIssuedEmail(cert.recipient.email, cert.recipient_name, cert.organisation.org_name, cert.cert_hash, verificationUrl);
+
+  await logAuditEvent({ org_id, action: 'RESEND', target: cert.cert_hash, metadata: { recipient_email: cert.recipient.email } });
+
+  return { success: true, message: 'Certificate email resent.' };
+}
+
 async function verifyCertificate(cert_hash, verifier_ip) {
   const dbCert = await prisma.certificate.findUnique({
     where:   { cert_hash },
-    include: { organisation: { select: { org_name: true } } },
+    include: {
+      organisation: { select: { org_name: true } },
+      recipient:    { select: { email: true } },
+    },
   });
 
   let chainCert;
@@ -159,13 +216,31 @@ async function verifyCertificate(cert_hash, verifier_ip) {
       msp_id:   chainCert.orgMSPID,
       org_name: dbCert?.organisation?.org_name ?? null,
     },
-    issued_at:  dbCert?.issued_at ?? null,
-    is_revoked: chainCert.isRevoked,
+    org_name:         dbCert?.organisation?.org_name ?? null,
+    certificate_id:   dbCert?.certificate_id ?? null,
+    recipient_name:   dbCert?.recipient_name ?? null,
+    recipient_email:  dbCert?.recipient?.email ?? null,
+    course:           dbCert?.course ?? null,
+    issued_at:        dbCert?.issued_at ?? null,
+    expiry_date:      dbCert?.expiry_date ?? null,
+    is_revoked:       chainCert.isRevoked,
+    status:           chainCert.isRevoked ? 'REVOKED' : 'ACTIVE',
+    blockchain_tx_id: dbCert?.blockchain_tx_id ?? null,
+    ...(dbCert ? await (async () => {
+      const [verification_count, lastLog] = await Promise.all([
+        prisma.verificationLog.count({ where: { certificate_id: dbCert.certificate_id } }),
+        prisma.verificationLog.findFirst({ where: { certificate_id: dbCert.certificate_id }, orderBy: { verified_at: 'desc' }, select: { verified_at: true } }),
+      ]);
+      return { verification_count, last_verified_at: lastLog?.verified_at ?? null };
+    })() : { verification_count: 0, last_verified_at: null }),
   };
 }
 
 async function revokeCertificate(org_id, cert_hash) {
-  const cert = await prisma.certificate.findUnique({ where: { cert_hash } });
+  const cert = await prisma.certificate.findUnique({
+    where: { cert_hash },
+    include: { organisation: { select: { org_name: true } } },
+  });
 
   if (!cert) {
     throw Object.assign(new Error('Certificate not found.'), { statusCode: 404 });
@@ -200,7 +275,15 @@ async function revokeCertificate(org_id, cert_hash) {
 
   await logAuditEvent({ org_id, action: 'REVOKE', target: cert_hash });
 
+  createNotification({
+    recipient_id: cert.recipient_id,
+    type: 'CERTIFICATE_REVOKED',
+    title: 'Certificate revoked',
+    body: `Your certificate for ${cert.course} issued by ${cert.organisation.org_name} has been revoked.`,
+    cert_hash,
+  }).catch(() => {});
+
   return { success: true, cert_hash };
 }
 
-module.exports = { issueCertificate, verifyCertificate, revokeCertificate };
+module.exports = { issueCertificate, verifyCertificate, revokeCertificate, getVerificationHistory, resendCertificateEmail };

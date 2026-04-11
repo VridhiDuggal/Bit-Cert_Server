@@ -20,7 +20,8 @@ const cryptoRoutes  = require('./routes/crypto.routes');
 const orgRoutes         = require('./routes/org.routes');
 const certificateRoutes = require('./routes/certificate.routes');
 const recipientRoutes   = require('./routes/recipient.routes');
-const authRoutes        = require('./routes/auth.routes');
+const authRoutes             = require('./routes/auth.routes');
+const notificationRoutes     = require('./routes/notification.routes');
 
 const app = express();
 
@@ -99,6 +100,7 @@ app.use('/api', orgRoutes);
 app.use('/api', certificateRoutes);
 app.use('/api', recipientRoutes);
 app.use('/api', authRoutes);
+app.use('/api', notificationRoutes);
 
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 

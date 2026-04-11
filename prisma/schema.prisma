@@ -21,11 +21,14 @@ model Organisation {
   password_hash String
   enrolled_at   DateTime      @default(now())
   status        OrgStatus     @default(active)
+  logo_url      String?
+  website       String?
+  description   String?
 
-  certificates  Certificate[]
-  recipients    Recipient[]
-  inviteTokens  InviteToken[]
-  auditLogs     AuditLog[]
+  certificates   Certificate[]
+  recipients     Recipient[]
+  inviteTokens   InviteToken[]
+  auditLogs      AuditLog[]
 
   @@index([email])
 }
@@ -37,10 +40,14 @@ model Recipient {
   password_hash     String?
   did               String?
   invited_by_org_id String         @db.Uuid
+  status            String         @default("active")
+  notes             String?
+  last_login_at     DateTime?
   created_at        DateTime       @default(now())
 
-  organisation  Organisation   @relation(fields: [invited_by_org_id], references: [org_id])
-  certificates  Certificate[]
+  organisation   Organisation    @relation(fields: [invited_by_org_id], references: [org_id])
+  certificates   Certificate[]
+  notifications  Notification[]
 
   @@index([invited_by_org_id])
 }
@@ -71,6 +78,9 @@ model Certificate {
   recipient_name   String
   course           String
   description      String?
+  tags             String[]     @default([])
+  expiry_date      DateTime?
+  template_id      String?
   issue_date       DateTime
   issued_by        String?
   issued_at        DateTime     @default(now())
@@ -122,4 +132,25 @@ model PasswordResetToken {
   created_at DateTime  @default(now())
 
   @@index([email])
+}
+
+model Notification {
+  notification_id  String           @id @default(uuid()) @db.Uuid
+  recipient_id     String           @db.Uuid
+  recipient        Recipient        @relation(fields: [recipient_id], references: [recipient_id], onDelete: Cascade)
+  type             NotificationType
+  title            String
+  body             String
+  cert_hash        String?
+  is_read          Boolean          @default(false)
+  created_at       DateTime         @default(now())
+
+  @@index([recipient_id])
+  @@index([created_at])
+}
+
+enum NotificationType {
+  CERTIFICATE_ISSUED
+  CERTIFICATE_REVOKED
+  WELCOME
 }
