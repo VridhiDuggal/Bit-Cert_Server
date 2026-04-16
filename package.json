@@ -11,6 +11,8 @@
     "build": "prisma generate",
     "start": "node src/index.js",
     "seed": "node scripts/seed.js",
+    "backfill": "node scripts/backfill-org-recipients.js",
+    "reset:dev": "bash scripts/reset-dev.sh",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"

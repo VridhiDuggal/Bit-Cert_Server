@@ -6,6 +6,7 @@ const prisma    = require('../database/prismaClient');
 const { generateKeyPair }       = require('./cryptoService');
 const { submitTransaction, evaluateTransaction } = require('./fabricService');
 const { encrypt } = require('../utils/encryption.util');
+const { logAuditEvent } = require('./auditLog.service');
 
 const BCRYPT_ROUNDS = 12;
 
@@ -120,23 +121,22 @@ async function getOrgRecipients(org_id, page, limit, search, status) {
   const skip = (page - 1) * limit;
   const now  = new Date();
 
-  const andClauses = [{ invited_by_org_id: org_id }];
+  const recipientWhere = {};
   if (search) {
-    andClauses.push({
-      OR: [
-        { email: { contains: search, mode: 'insensitive' } },
-        { name:  { contains: search, mode: 'insensitive' } },
-      ],
-    });
+    recipientWhere.OR = [
+      { email: { contains: search, mode: 'insensitive' } },
+      { name:  { contains: search, mode: 'insensitive' } },
+    ];
   }
-  if (status === 'active')    andClauses.push({ status: 'active' });
-  if (status === 'suspended') andClauses.push({ status: 'suspended' });
-
-  const where = { AND: andClauses };
+  if (status === 'active')    recipientWhere.status = 'active';
+  if (status === 'suspended') recipientWhere.status = 'suspended';
 
   const [rows, total] = await Promise.all([
     prisma.recipient.findMany({
-      where,
+      where: {
+        orgRelationships: { some: { org_id } },
+        ...recipientWhere,
+      },
       orderBy: { created_at: 'desc' },
       skip,
       take: limit,
@@ -160,7 +160,12 @@ async function getOrgRecipients(org_id, page, limit, search, status) {
         },
       },
     }),
-    prisma.recipient.count({ where }),
+    prisma.recipient.count({
+      where: {
+        orgRelationships: { some: { org_id } },
+        ...recipientWhere,
+      },
+    }),
   ]);
 
   // Batch-fetch the latest invite token per email for this org
@@ -235,8 +240,12 @@ async function getOrgRecipientDetail(org_id, recipient_id) {
   if (!r) {
     throw Object.assign(new Error('Recipient not found.'), { statusCode: 404 });
   }
-  if (r.invited_by_org_id !== org_id) {
-    throw Object.assign(new Error('Access denied.'), { statusCode: 403 });
+
+  const relationship = await prisma.orgRecipient.findUnique({
+    where: { org_id_recipient_id: { org_id, recipient_id } },
+  });
+  if (!relationship) {
+    throw Object.assign(new Error('Recipient not found.'), { statusCode: 404 });
   }
 
   let invite_status = 'accepted';
@@ -260,19 +269,31 @@ async function updateOrgRecipient(org_id, recipient_id, data) {
   if (!existing) {
     throw Object.assign(new Error('Recipient not found.'), { statusCode: 404 });
   }
-  if (existing.invited_by_org_id !== org_id) {
-    throw Object.assign(new Error('Access denied.'), { statusCode: 403 });
-  }
 
-  const updated = await prisma.recipient.update({
-    where: { recipient_id },
-    data,
+  const relationship = await prisma.orgRecipient.findUnique({
+    where: { org_id_recipient_id: { org_id, recipient_id } },
   });
-
-  if (data.status && data.status !== existing.status) {
-    const action = data.status === 'suspended' ? 'RECIPIENT_SUSPEND' : 'RECIPIENT_UNSUSPEND';
-    await logAuditEvent({ org_id, action, target: existing.email });
+  if (!relationship) {
+    throw Object.assign(new Error('Recipient not found.'), { statusCode: 404 });
   }
+
+  if (data.status && data.status === existing.status) {
+    const { password_hash, ...safe } = existing;
+    return safe;
+  }
+
+  const statusChanged = !!(data.status && data.status !== existing.status);
+  const auditAction = statusChanged
+    ? (data.status === 'suspended' ? 'RECIPIENT_SUSPEND' : 'RECIPIENT_UNSUSPEND')
+    : null;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const result = await tx.recipient.update({ where: { recipient_id }, data });
+    if (auditAction) {
+      await tx.auditLog.create({ data: { org_id, action: auditAction, target: existing.email, metadata: null } });
+    }
+    return result;
+  });
 
   const { password_hash, ...safe } = updated;
   return safe;
@@ -351,7 +372,7 @@ async function getOrgStats(org_id) {
 
   const [total_certificates, total_recipients, revoked_certificates, pendingInvites, monthlyVerifications] = await Promise.all([
     prisma.certificate.count({ where: { org_id } }),
-    prisma.recipient.count({ where: { invited_by_org_id: org_id } }),
+    prisma.recipient.count({ where: { orgRelationships: { some: { org_id } } } }),
     prisma.certificate.count({ where: { org_id, is_revoked: true } }),
     prisma.inviteToken.count({
       where: {
@@ -379,10 +400,16 @@ async function getOrgStats(org_id) {
 }
 
 function buildActivityDescription(action, target, metadata) {
-  if (action === 'ISSUE')            return `Certificate issued to ${metadata?.recipient_email ?? target}`;
-  if (action === 'REVOKE')           return `Certificate revoked (${target})`;
-  if (action === 'INVITE')           return `Invite sent to ${target}`;
-  if (action === 'RECIPIENT_CREATE') return `Recipient registered: ${target}`;
+  const recipientLabel = metadata?.recipient_name
+    ? `${metadata.recipient_name} (${metadata.recipient_email ?? ''})`.trim()
+    : (metadata?.recipient_email ?? target);
+  if (action === 'ISSUE')              return `Certificate issued to ${recipientLabel}`;
+  if (action === 'REVOKE')             return `Certificate revoked for ${recipientLabel}`;
+  if (action === 'INVITE')             return `Invite sent to ${target}`;
+  if (action === 'RECIPIENT_CREATE')   return `Recipient registered: ${target}`;
+  if (action === 'RECIPIENT_SUSPEND')  return `Recipient suspended: ${target}`;
+  if (action === 'RECIPIENT_UNSUSPEND') return `Recipient reactivated: ${target}`;
+  if (action === 'RESEND')             return `Certificate email resent to ${recipientLabel}`;
   return `${action}: ${target}`;
 }
 
@@ -393,14 +420,37 @@ async function getRecentActivity(org_id) {
     take: 10,
   });
 
-  return logs.map(l => ({
-    log_id:      l.log_id,
-    action:      l.action,
-    target:      l.target,
-    metadata:    l.metadata,
-    created_at:  l.created_at,
-    description: buildActivityDescription(l.action, l.target, l.metadata),
-  }));
+  const certActions = new Set(['ISSUE', 'REVOKE', 'RESEND']);
+  const needsLookup = logs.filter(
+    l => certActions.has(l.action) && !l.metadata?.recipient_name
+  );
+
+  let certMap = {};
+  if (needsLookup.length > 0) {
+    const hashes = needsLookup.map(l => l.target);
+    const certs = await prisma.certificate.findMany({
+      where: { cert_hash: { in: hashes }, org_id },
+      select: { cert_hash: true, recipient: { select: { name: true, email: true } } },
+    });
+    certMap = Object.fromEntries(certs.map(c => [c.cert_hash, c.recipient]));
+  }
+
+  return logs.map(l => {
+    const enrichedMeta = { ...(l.metadata ?? {}) };
+    const certRecipient = certMap[l.target];
+    if (certRecipient) {
+      enrichedMeta.recipient_email = enrichedMeta.recipient_email ?? certRecipient.email;
+      enrichedMeta.recipient_name  = enrichedMeta.recipient_name  ?? certRecipient.name;
+    }
+    return {
+      log_id:      l.log_id,
+      action:      l.action,
+      target:      l.target,
+      metadata:    l.metadata,
+      created_at:  l.created_at,
+      description: buildActivityDescription(l.action, l.target, enrichedMeta),
+    };
+  });
 }
 
 async function getIssuanceChart(org_id) {
@@ -435,7 +485,7 @@ async function getOrgAuditLogs(org_id, page, limit, { action, date_from, date_to
   if (action)    andClauses.push({ action });
   if (target)    andClauses.push({ target: { contains: target, mode: 'insensitive' } });
   if (date_from) andClauses.push({ created_at: { gte: new Date(date_from) } });
-  if (date_to)   andClauses.push({ created_at: { lte: new Date(date_to) } });
+  if (date_to)   { const end = new Date(date_to); end.setUTCHours(23, 59, 59, 999); andClauses.push({ created_at: { lte: end } }); }
 
   const where = { AND: andClauses };
 
@@ -457,7 +507,7 @@ async function exportOrgAuditLogs(org_id, { action, date_from, date_to, target }
   if (action)    andClauses.push({ action });
   if (target)    andClauses.push({ target: { contains: target, mode: 'insensitive' } });
   if (date_from) andClauses.push({ created_at: { gte: new Date(date_from) } });
-  if (date_to)   andClauses.push({ created_at: { lte: new Date(date_to) } });
+  if (date_to)   { const end = new Date(date_to); end.setUTCHours(23, 59, 59, 999); andClauses.push({ created_at: { lte: end } }); }
 
   const where = { AND: andClauses };
 

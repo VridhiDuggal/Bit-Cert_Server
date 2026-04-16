@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto   = require('crypto');
 const prisma   = require('../database/prismaClient');
 const { hashData, signData, verifySignature } = require('./cryptoService');
 const { submitTransaction, evaluateTransaction } = require('./fabricService');
@@ -37,7 +38,20 @@ async function issueCertificate({ org, recipient_id, recipient_email, recipient_
   }
 
   const payload   = { msp_id: org.msp_id, recipient_name, course, issue_date };
-  const cert_hash = hashData(payload);
+  const nonce     = crypto.randomBytes(16).toString('hex');
+  const cert_hash = hashData({ ...payload, nonce });
+
+  const existingCert = await prisma.certificate.findUnique({ where: { cert_hash } });
+  if (existingCert) {
+    return {
+      certificate_id:   existingCert.certificate_id,
+      cert_hash:        existingCert.cert_hash,
+      blockchain_tx_id: existingCert.blockchain_tx_id,
+      file_path:        existingCert.file_path,
+      qr_code:          null,
+    };
+  }
+
   const signature = signData(cert_hash, decrypt(orgRecord.private_key));
 
   let blockchain_tx_id;
@@ -59,6 +73,7 @@ async function issueCertificate({ org, recipient_id, recipient_email, recipient_
         org_id:          org.org_id,
         recipient_id:    resolvedRecipientId,
         cert_hash,
+        nonce,
         ecdsa_signature: signature,
         blockchain_tx_id,
         file_path:       `uploads/${cert_hash}.pdf`,
@@ -79,21 +94,30 @@ async function issueCertificate({ org, recipient_id, recipient_email, recipient_
     );
   }
 
-  const file_path = await generateCertificatePDF({
-    recipient_name,
-    course,
-    description,
-    issue_date,
-    org_name: orgRecord.org_name,
-    cert_hash,
-  });
-
-  await prisma.certificate.update({ where: { cert_hash }, data: { file_path } });
-
-  const verificationUrl = `${process.env.VERIFICATION_BASE_URL ?? 'http://localhost:8000'}/api/verify/${cert_hash}`;
+  const verificationUrl = `${process.env.FRONTEND_BASE_URL ?? 'http://localhost:5173'}/verify/${cert_hash}`;
   const qr_code = await generateQRCode(verificationUrl);
 
-  await logAuditEvent({ org_id: org.org_id, action: 'ISSUE', target: cert_hash, metadata: { recipient_email, course } });
+  setImmediate(async () => {
+    try {
+      const pdfPath = await generateCertificatePDF({
+        recipient_name,
+        course,
+        description,
+        issue_date,
+        org_name: orgRecord.org_name,
+        cert_hash,
+        certificate_id: certificate.certificate_id,
+      });
+      await prisma.certificate.update({ where: { cert_hash }, data: { file_path: pdfPath } });
+    } catch (pdfErr) {
+      console.error(`[CERT] PDF generation failed for ${cert_hash}:`, pdfErr.message);
+    }
+    try {
+      await logAuditEvent({ org_id: org.org_id, action: 'ISSUE', target: cert_hash, metadata: { recipient_email: recipient_email ?? recipient?.email, course } });
+    } catch (auditErr) {
+      console.error(`[CERT] Audit log failed for ${cert_hash}:`, auditErr.message);
+    }
+  });
 
   createNotification({
     recipient_id: resolvedRecipientId,
@@ -105,7 +129,6 @@ async function issueCertificate({ org, recipient_id, recipient_email, recipient_
 
   const recipientRecord = await prisma.recipient.findUnique({ where: { recipient_id: resolvedRecipientId }, select: { email: true } });
   if (recipientRecord?.email) {
-    const verificationUrl = `${process.env.VERIFICATION_BASE_URL ?? 'http://localhost:8000'}/api/verify/${cert_hash}`;
     sendCertificateIssuedEmail(recipientRecord.email, recipient_name, orgRecord.org_name, cert_hash, verificationUrl).catch(() => {});
   }
 
@@ -115,7 +138,7 @@ async function issueCertificate({ org, recipient_id, recipient_email, recipient_
     certificate_id:   certificate.certificate_id,
     cert_hash:        certificate.cert_hash,
     blockchain_tx_id: certificate.blockchain_tx_id,
-    file_path,
+    file_path:        `uploads/${cert_hash}.pdf`,
     qr_code,
   };
 }
@@ -148,7 +171,7 @@ async function resendCertificateEmail(org_id, certificate_id) {
   if (!cert) throw Object.assign(new Error('Certificate not found.'), { statusCode: 404 });
   if (cert.org_id !== org_id) throw Object.assign(new Error('Access denied.'), { statusCode: 403 });
 
-  const verificationUrl = `${process.env.VERIFICATION_BASE_URL ?? 'http://localhost:8000'}/api/verify/${cert.cert_hash}`;
+  const verificationUrl = `${process.env.FRONTEND_BASE_URL ?? 'http://localhost:5173'}/verify/${cert.cert_hash}`;
   await sendCertificateIssuedEmail(cert.recipient.email, cert.recipient_name, cert.organisation.org_name, cert.cert_hash, verificationUrl);
 
   await logAuditEvent({ org_id, action: 'RESEND', target: cert.cert_hash, metadata: { recipient_email: cert.recipient.email } });

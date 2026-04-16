@@ -74,35 +74,47 @@ app.get('/health', (req, res) => {
 // Example: app.use('/api/v1/auth', require('./routes/auth.routes'));
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max:      20,
+  max:      10,
   standardHeaders: true,
   legacyHeaders:   false,
   message: { success: false, message: 'Too many requests. Please try again later.' },
+});
+
+const inviteLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max:      5,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message: { success: false, message: 'Too many invite attempts. Please try again later.' },
 });
 
 const verifyLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max:      100,
+  windowMs: 60 * 1000,
+  max:      60,
   standardHeaders: true,
   legacyHeaders:   false,
   message: { success: false, message: 'Too many requests. Please try again later.' },
 });
 
-app.use('/api/org/login',              authLimiter);
-app.use('/api/recipient/login',        authLimiter);
-app.use('/api/auth/forgot-password',   authLimiter);
-app.use('/api/auth/reset-password',    authLimiter);
-app.use('/api/verify',                 verifyLimiter);
+app.use('/api/org/login',                  authLimiter);
+app.use('/api/recipient/login',            authLimiter);
+app.use('/api/auth/forgot-password',       authLimiter);
+app.use('/api/auth/reset-password',        authLimiter);
+app.use('/api/recipient/accept-invite',    inviteLimiter);
+app.use('/api/verify',                     verifyLimiter);
 
 app.use('/api', testRoutes);
-app.use('/api', cryptoRoutes);
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api', cryptoRoutes);
+}
 app.use('/api', orgRoutes);
 app.use('/api', certificateRoutes);
 app.use('/api', recipientRoutes);
 app.use('/api', authRoutes);
 app.use('/api', notificationRoutes);
 
-app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+// Static /uploads removed — use authenticated /api/recipient/certificate/:id/download
+// and /api/org/certificate/:id/download endpoints instead.
 
 // ── 404 fallback ──────────────────────────────────────────────────────────────
 // Catches any request that did not match a registered route.

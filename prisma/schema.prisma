@@ -25,10 +25,11 @@ model Organisation {
   website       String?
   description   String?
 
-  certificates   Certificate[]
-  recipients     Recipient[]
-  inviteTokens   InviteToken[]
-  auditLogs      AuditLog[]
+  certificates      Certificate[]
+  recipients        Recipient[]
+  inviteTokens      InviteToken[]
+  auditLogs         AuditLog[]
+  orgRelationships  OrgRecipient[]
 
   @@index([email])
 }
@@ -39,17 +40,31 @@ model Recipient {
   name              String
   password_hash     String?
   did               String?
-  invited_by_org_id String         @db.Uuid
+  invited_by_org_id String?        @db.Uuid
   status            String         @default("active")
   notes             String?
   last_login_at     DateTime?
   created_at        DateTime       @default(now())
 
-  organisation   Organisation    @relation(fields: [invited_by_org_id], references: [org_id])
-  certificates   Certificate[]
-  notifications  Notification[]
+  organisation     Organisation?   @relation(fields: [invited_by_org_id], references: [org_id])
+  certificates     Certificate[]
+  notifications    Notification[]
+  orgRelationships OrgRecipient[]
 
   @@index([invited_by_org_id])
+}
+
+model OrgRecipient {
+  org_id       String   @db.Uuid
+  recipient_id String   @db.Uuid
+  joined_at    DateTime @default(now())
+
+  organisation Organisation @relation(fields: [org_id], references: [org_id])
+  recipient    Recipient    @relation(fields: [recipient_id], references: [recipient_id])
+
+  @@id([org_id, recipient_id])
+  @@index([org_id])
+  @@index([recipient_id])
 }
 
 model InviteToken {
@@ -72,6 +87,7 @@ model Certificate {
   org_id           String       @db.Uuid
   recipient_id     String       @db.Uuid
   cert_hash        String       @unique @db.Char(64)
+  nonce            String?
   ecdsa_signature  String
   blockchain_tx_id String
   file_path        String

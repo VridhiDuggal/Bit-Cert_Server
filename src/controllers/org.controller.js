@@ -260,7 +260,7 @@ async function inviteRecipientController(req, res, next) {
     if (value.invites) {
       const sent = [];
       const failed = [];
-      const base = process.env.APP_BASE_URL ?? process.env.VERIFICATION_BASE_URL ?? 'http://localhost:5173';
+      const base = process.env.APP_BASE_URL ?? process.env.FRONTEND_BASE_URL ?? 'http://localhost:5173';
       for (const { email } of value.invites) {
         try {
           const token = await generateInviteToken(req.org.org_id, email);
@@ -274,11 +274,18 @@ async function inviteRecipientController(req, res, next) {
       return res.status(StatusCodes.OK).json({ success: true, sent: sent.length, failed });
     }
 
-    const token = await generateInviteToken(req.org.org_id, value.email);
-    const base = process.env.APP_BASE_URL ?? process.env.VERIFICATION_BASE_URL ?? 'http://localhost:5173';
-    const inviteLink = `${base}/accept-invite?token=${token}`;
-    await sendInviteEmail(value.email, inviteLink, req.org.org_name);
-    return res.status(StatusCodes.OK).json({ success: true, token });
+    try {
+      const token = await generateInviteToken(req.org.org_id, value.email);
+      const base = process.env.APP_BASE_URL ?? process.env.FRONTEND_BASE_URL ?? 'http://localhost:5173';
+      const inviteLink = `${base}/accept-invite?token=${token}`;
+      await sendInviteEmail(value.email, inviteLink, req.org.org_name);
+      return res.status(StatusCodes.OK).json({ success: true, token });
+    } catch (e) {
+      if (e.code === 'RECIPIENT_ALREADY_ONBOARDED') {
+        return res.status(StatusCodes.CONFLICT).json({ success: false, message: e.message });
+      }
+      throw e;
+    }
   } catch (err) {
     next(err);
   }
@@ -462,4 +469,29 @@ async function resendCertificateController(req, res, next) {
   }
 }
 
-module.exports = { onboardOrgController, loginOrgController, getOrgRecipientsController, getOrgRecipientDetailController, updateOrgRecipientController, getOrgCertificatesController, getOrgStatsController, revokeCertificateController, getOrgAuditLogsController, exportOrgAuditLogsController, inviteRecipientController, getCertificateByIdController, getOrgProfileController, updateOrgProfileController, changePasswordController, getDashboardActivityController, getDashboardChartController, issueCertificateController, getVerificationHistoryController, resendCertificateController };
+async function downloadOrgCertificateController(req, res, next) {
+  try {
+    const { id: certificate_id } = req.params;
+    const cert = await prisma.certificate.findUnique({ where: { certificate_id } });
+
+    if (!cert || cert.org_id !== req.org.org_id) {
+      return res.status(StatusCodes.NOT_FOUND).json({ success: false, message: 'Certificate not found.' });
+    }
+
+    const fs   = require('fs');
+    const path = require('path');
+    const filePath = path.join(__dirname, '..', '..', cert.file_path);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(StatusCodes.NOT_FOUND).json({ success: false, message: 'Certificate file not yet available.' });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="certificate-${cert.cert_hash.slice(0, 8)}.pdf"`);
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { onboardOrgController, loginOrgController, getOrgRecipientsController, getOrgRecipientDetailController, updateOrgRecipientController, getOrgCertificatesController, getOrgStatsController, revokeCertificateController, getOrgAuditLogsController, exportOrgAuditLogsController, inviteRecipientController, getCertificateByIdController, getOrgProfileController, updateOrgProfileController, changePasswordController, getDashboardActivityController, getDashboardChartController, issueCertificateController, getVerificationHistoryController, resendCertificateController, downloadOrgCertificateController };

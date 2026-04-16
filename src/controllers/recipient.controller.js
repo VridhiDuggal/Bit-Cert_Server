@@ -3,8 +3,9 @@
 const Joi             = require('joi');
 const bcrypt          = require('bcryptjs');
 const { StatusCodes } = require('http-status-codes');
-const { createRecipient, loginRecipient, getRecipientCertificates, getCertificateQR, getMyCertificateById, getRecipientProfile, getRecipientDashboardStats, getVerificationHistory, updateRecipientProfile, changeRecipientPassword } = require('../services/recipient.service');
+const { createRecipient, loginRecipient, getRecipientOrgs, getRecipientCertificates, getCertificateQR, getMyCertificateById, getRecipientProfile, getRecipientDashboardStats, getVerificationHistory, updateRecipientProfile, changeRecipientPassword } = require('../services/recipient.service');
 const { validateInviteToken, markTokenUsed, previewInvite } = require('../services/invite.service');
+const { logAuditEvent } = require('../services/auditLog.service');
 const prisma = require('../database/prismaClient');
 
 const createSchema = Joi.object({
@@ -66,6 +67,7 @@ const certFilterSchema = Joi.object({
   status:    Joi.string().valid('active', 'revoked').optional(),
   from_date: Joi.date().optional(),
   to_date:   Joi.date().optional(),
+  org_id:    Joi.string().uuid().optional(),
 });
 
 async function getMyCertificatesController(req, res, next) {
@@ -98,8 +100,8 @@ async function getCertificateQRController(req, res, next) {
 
 const acceptInviteSchema = Joi.object({
   token:    Joi.string().required(),
-  name:     Joi.string().max(120).required(),
-  password: Joi.string().min(8).required(),
+  name:     Joi.string().max(120).optional(),
+  password: Joi.string().min(8).optional(),
 });
 
 async function acceptInviteController(req, res, next) {
@@ -114,25 +116,60 @@ async function acceptInviteController(req, res, next) {
     }
 
     const invite = await validateInviteToken(value.token);
-    const password_hash = await bcrypt.hash(value.password, 12);
 
-    await prisma.recipient.upsert({
-      where:  { email: invite.recipient_email },
-      create: {
-        email:              invite.recipient_email,
-        name:               value.name,
-        password_hash,
-        invited_by_org_id:  invite.org_id,
-      },
-      update: {
-        name:          value.name,
-        password_hash,
-      },
+    const existing = await prisma.recipient.findUnique({ where: { email: invite.recipient_email } });
+
+    const accountStatus = !existing ? 'new' : (!existing.password_hash ? 'shell' : 'registered');
+
+    let recipient;
+
+    if (accountStatus === 'registered') {
+      await prisma.orgRecipient.upsert({
+        where:  { org_id_recipient_id: { org_id: invite.org_id, recipient_id: existing.recipient_id } },
+        create: { org_id: invite.org_id, recipient_id: existing.recipient_id },
+        update: {},
+      });
+      await markTokenUsed(invite.token_hash);
+      await logAuditEvent({ org_id: invite.org_id, action: 'RECIPIENT_CREATE', target: invite.recipient_email, metadata: { accountStatus: 'registered' } });
+      return res.status(StatusCodes.OK).json({ success: true, accountStatus: 'registered', message: 'Invite accepted. Log in to see your new certificate.' });
+    }
+
+    if (accountStatus === 'shell') {
+      if (!value.password) {
+        return res.status(StatusCodes.UNPROCESSABLE_ENTITY).json({ success: false, message: 'Validation failed.', errors: ['password is required.'] });
+      }
+      const password_hash = await bcrypt.hash(value.password, 12);
+      const updateData = { password_hash };
+      if (value.name && !existing.name) updateData.name = value.name;
+      recipient = await prisma.recipient.update({ where: { recipient_id: existing.recipient_id }, data: updateData });
+    } else {
+      if (!value.name || !value.password) {
+        const errors = [];
+        if (!value.name)     errors.push('name is required.');
+        if (!value.password) errors.push('password is required.');
+        return res.status(StatusCodes.UNPROCESSABLE_ENTITY).json({ success: false, message: 'Validation failed.', errors });
+      }
+      const password_hash = await bcrypt.hash(value.password, 12);
+      recipient = await prisma.recipient.create({
+        data: {
+          email:             invite.recipient_email,
+          name:              value.name,
+          password_hash,
+          invited_by_org_id: invite.org_id,
+        },
+      });
+    }
+
+    await prisma.orgRecipient.upsert({
+      where:  { org_id_recipient_id: { org_id: invite.org_id, recipient_id: recipient.recipient_id } },
+      create: { org_id: invite.org_id, recipient_id: recipient.recipient_id },
+      update: {},
     });
 
     await markTokenUsed(invite.token_hash);
+    await logAuditEvent({ org_id: invite.org_id, action: 'RECIPIENT_CREATE', target: invite.recipient_email, metadata: { accountStatus } });
 
-    return res.status(StatusCodes.OK).json({ success: true, message: 'Account activated. You can now log in.' });
+    return res.status(StatusCodes.OK).json({ success: true, accountStatus, message: 'Account activated. You can now log in.' });
   } catch (err) {
     next(err);
   }
@@ -210,6 +247,43 @@ async function changePasswordController(req, res, next) {
   }
 }
 
+async function getRecipientOrgsController(req, res, next) {
+  try {
+    const orgs = await getRecipientOrgs(req.recipient.recipient_id);
+    return res.status(StatusCodes.OK).json({ success: true, orgs });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function downloadCertificateController(req, res, next) {
+  try {
+    const { id: certificate_id } = req.params;
+    const cert = await prisma.certificate.findUnique({ where: { certificate_id } });
+
+    if (!cert) {
+      return res.status(StatusCodes.NOT_FOUND).json({ success: false, message: 'Certificate not found.' });
+    }
+    if (cert.recipient_id !== req.recipient.recipient_id) {
+      return res.status(StatusCodes.NOT_FOUND).json({ success: false, message: 'Certificate not found.' });
+    }
+
+    const fs   = require('fs');
+    const path = require('path');
+    const filePath = path.join(__dirname, '..', '..', cert.file_path);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(StatusCodes.NOT_FOUND).json({ success: false, message: 'Certificate file not yet available.' });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="certificate-${cert.cert_hash.slice(0, 8)}.pdf"`);
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function previewInviteController(req, res, next) {
   try {
     const { token } = req.query;
@@ -223,4 +297,4 @@ async function previewInviteController(req, res, next) {
   }
 }
 
-module.exports = { createRecipientController, loginRecipientController, getMyCertificatesController, getCertificateQRController, acceptInviteController, getMyCertificateByIdController, getRecipientProfileController, getDashboardStats, getVerificationHistoryController, updateProfileController, changePasswordController, previewInviteController };
+module.exports = { createRecipientController, loginRecipientController, getMyCertificatesController, getCertificateQRController, acceptInviteController, getMyCertificateByIdController, getRecipientProfileController, getDashboardStats, getVerificationHistoryController, updateProfileController, changePasswordController, previewInviteController, getRecipientOrgsController, downloadCertificateController };

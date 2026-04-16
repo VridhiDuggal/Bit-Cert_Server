@@ -34,17 +34,25 @@ async function loginRecipient({ email, password }) {
 }
 
 async function createRecipient(org_id, { email, name }) {
-  const existing = await prisma.recipient.findUnique({ where: { email } });
+  let recipient = await prisma.recipient.findUnique({ where: { email } });
+  let isNew = false;
 
-  if (existing) {
-    return existing;
+  if (!recipient) {
+    recipient = await prisma.recipient.create({
+      data: { email, name, invited_by_org_id: org_id },
+    });
+    isNew = true;
   }
 
-  const recipient = await prisma.recipient.create({
-    data: { email, name, invited_by_org_id: org_id },
+  await prisma.orgRecipient.upsert({
+    where:  { org_id_recipient_id: { org_id, recipient_id: recipient.recipient_id } },
+    create: { org_id, recipient_id: recipient.recipient_id },
+    update: {},
   });
 
-  await logAuditEvent({ org_id, action: 'RECIPIENT_CREATE', target: email });
+  if (isNew) {
+    await logAuditEvent({ org_id, action: 'RECIPIENT_CREATE', target: email });
+  }
 
   return recipient;
 }
@@ -59,8 +67,39 @@ async function getRecipientById(recipient_id) {
   return recipient;
 }
 
-async function getRecipientCertificates(recipient_id, { page = 1, limit = 12, search, status, from_date, to_date } = {}) {
+async function getRecipientOrgs(recipient_id) {
+  const rows = await prisma.orgRecipient.findMany({
+    where:   { recipient_id },
+    include: {
+      organisation: {
+        select: { org_id: true, org_name: true, logo_url: true },
+      },
+    },
+  });
+
+  const orgIds = rows.map(r => r.org_id);
+
+  const certCounts = await prisma.certificate.groupBy({
+    by:    ['org_id'],
+    where: { recipient_id, org_id: { in: orgIds } },
+    _count: { certificate_id: true },
+  });
+
+  const countMap = {};
+  for (const c of certCounts) countMap[c.org_id] = c._count.certificate_id;
+
+  return rows.map(r => ({
+    org_id:     r.organisation.org_id,
+    org_name:   r.organisation.org_name,
+    logo_url:   r.organisation.logo_url,
+    cert_count: countMap[r.org_id] ?? 0,
+    joined_at:  r.joined_at,
+  }));
+}
+
+async function getRecipientCertificates(recipient_id, { page = 1, limit = 12, search, status, from_date, to_date, org_id } = {}) {
   const andClauses = [];
+  if (org_id) andClauses.push({ org_id });
   if (search) {
     andClauses.push({
       OR: [
@@ -107,8 +146,10 @@ async function getRecipientCertificates(recipient_id, { page = 1, limit = 12, se
     org_name:         c.organisation.org_name,
     msp_id:           c.organisation.msp_id,
     issue_date:       c.issue_date,
+    expiry_date:      c.expiry_date ?? null,
+    is_expired:       c.expiry_date ? new Date(c.expiry_date) < new Date() : false,
     file_path:        c.file_path,
-    qr_url:           `${process.env.VERIFICATION_BASE_URL}/api/verify/${c.cert_hash}`,
+    qr_url:           `${process.env.FRONTEND_BASE_URL ?? 'http://localhost:5173'}/verify/${c.cert_hash}`,
   }));
 
   return { certificates, total };
@@ -127,7 +168,7 @@ async function getCertificateQR(recipient_id, certificate_id) {
 
   return {
     cert_hash: cert.cert_hash,
-    qr_url:    `${process.env.VERIFICATION_BASE_URL}/api/verify/${cert.cert_hash}`,
+    qr_url:    `${process.env.FRONTEND_BASE_URL ?? 'http://localhost:5173'}/verify/${cert.cert_hash}`,
   };
 }
 
@@ -159,15 +200,30 @@ async function getMyCertificateById(recipient_id, certificate_id) {
     file_path:        cert.file_path,
     org_name:         cert.organisation.org_name,
     msp_id:           cert.organisation.msp_id,
-    verification_url: `${process.env.VERIFICATION_BASE_URL}/api/verify/${cert.cert_hash}`,
+    verification_url: `${process.env.FRONTEND_BASE_URL ?? 'http://localhost:5173'}/verify/${cert.cert_hash}`,
   };
 }
 
 async function getRecipientProfile(recipient_id) {
-  const recipient = await prisma.recipient.findUnique({
-    where:   { recipient_id },
-    include: { organisation: { select: { org_name: true } } },
-  });
+  const [recipient, orgLinks] = await Promise.all([
+    prisma.recipient.findUnique({
+      where:  { recipient_id },
+      select: {
+        recipient_id:  true,
+        name:          true,
+        email:         true,
+        did:           true,
+        status:        true,
+        created_at:    true,
+        last_login_at: true,
+        organisation:  { select: { org_name: true } },
+      },
+    }),
+    prisma.orgRecipient.findMany({
+      where:  { recipient_id },
+      select: { organisation: { select: { org_id: true, org_name: true } } },
+    }),
+  ]);
 
   if (!recipient) {
     throw Object.assign(new Error('Recipient not found.'), { statusCode: 404 });
@@ -182,6 +238,7 @@ async function getRecipientProfile(recipient_id) {
     created_at:          recipient.created_at,
     last_login_at:       recipient.last_login_at,
     invited_by_org_name: recipient.organisation?.org_name ?? null,
+    organisations:       orgLinks.map(l => ({ org_id: l.organisation.org_id, org_name: l.organisation.org_name })),
   };
 }
 
@@ -254,4 +311,4 @@ async function changeRecipientPassword({ recipient_id, current_password, new_pas
   return { message: 'Password updated successfully' };
 }
 
-module.exports = { loginRecipient, createRecipient, getRecipientById, getRecipientCertificates, getCertificateQR, getMyCertificateById, getRecipientProfile, getRecipientDashboardStats, getVerificationHistory, updateRecipientProfile, changeRecipientPassword };
+module.exports = { loginRecipient, createRecipient, getRecipientById, getRecipientOrgs, getRecipientCertificates, getCertificateQR, getMyCertificateById, getRecipientProfile, getRecipientDashboardStats, getVerificationHistory, updateRecipientProfile, changeRecipientPassword };

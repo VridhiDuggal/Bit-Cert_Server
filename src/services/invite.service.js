@@ -19,6 +19,16 @@ function sha256Hex(str) {
 }
 
 async function generateInviteToken(org_id, recipient_email) {
+  const existing = await prisma.inviteToken.findFirst({
+    where: { org_id, recipient_email, used_at: { not: null } },
+  });
+  if (existing) {
+    throw Object.assign(
+      new Error('This recipient has already accepted an invite from your organisation. You can issue them a certificate directly.'),
+      { statusCode: 409, code: 'RECIPIENT_ALREADY_ONBOARDED' }
+    );
+  }
+
   const raw = crypto.randomBytes(32);
   const sig  = hmacSign(raw);
   const token = toBase64url(raw) + '.' + toBase64url(sig);
@@ -122,10 +132,25 @@ async function previewInvite({ token }) {
     select: { org_name: true },
   });
 
+  const existingRecipient = await prisma.recipient.findUnique({
+    where:  { email: invite.recipient_email },
+    select: { password_hash: true },
+  });
+
+  let accountStatus;
+  if (!existingRecipient) {
+    accountStatus = 'new';
+  } else if (!existingRecipient.password_hash) {
+    accountStatus = 'shell';
+  } else {
+    accountStatus = 'registered';
+  }
+
   return {
     org_name:        org?.org_name ?? null,
     recipient_email: invite.recipient_email,
     expires_at:      invite.expires_at,
+    accountStatus,
   };
 }
 
