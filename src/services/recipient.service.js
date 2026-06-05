@@ -105,7 +105,9 @@ async function getRecipientCertificates(recipient_id, { page = 1, limit = 12, se
       OR: [
         { course:         { contains: search, mode: 'insensitive' } },
         { recipient_name: { contains: search, mode: 'insensitive' } },
+        { recipient:      { email: { contains: search, mode: 'insensitive' } } },
         { organisation:   { org_name: { contains: search, mode: 'insensitive' } } },
+        { cert_hash:      { contains: search, mode: 'insensitive' } },
       ],
     });
   }

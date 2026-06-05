@@ -48,7 +48,7 @@ async function connectGateway() {
   await _gateway.connect(connectionProfile, {
     wallet,
     identity: IDENTITY_LABEL,
-    discovery: { enabled: true, asLocalhost: true },
+    discovery: { enabled: true, asLocalhost: false },
   });
 
   const network = await _gateway.getNetwork(CHANNEL_NAME);

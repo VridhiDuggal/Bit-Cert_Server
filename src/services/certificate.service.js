@@ -107,6 +107,7 @@ async function issueCertificate({ org, recipient_id, recipient_email, recipient_
         org_name: orgRecord.org_name,
         cert_hash,
         certificate_id: certificate.certificate_id,
+        qr_code,
       });
       await prisma.certificate.update({ where: { cert_hash }, data: { file_path: pdfPath } });
     } catch (pdfErr) {

@@ -1,27 +1,48 @@
-# Node
+# Dependencies
 node_modules/
-npm-debug.log
 
-# Env
+# Environment & secrets
 .env
+.env.*
+!.env.example
 
-# Wallets (CRITICAL)
+# Hyperledger Fabric wallet & local crypto (never commit)
 src/wallet/
-src/src/wallet/
-
-# Fabric crypto (CRITICAL)
 fabric-samples/
+**/crypto-config/
+connection-org1.json
+*.pem
+*.key
 
-# Chaincode vendor (optional)
+# Chaincode vendored deps (regenerate with `go mod vendor` in chaincode/bitcert)
 chaincode/bitcert/vendor/
 
-# Logs
-*.log
+# Generated / runtime files
+uploads/
+dist/
 logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test & coverage
+coverage/
+.nyc_output/
+
+# Caches & temp
+.cache/
+tmp/
+temp/
+*.pid
+*.tsbuildinfo
 
 # OS
 .DS_Store
+Thumbs.db
 
-# Build / temp
-dist/
-uploads/
+# Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json

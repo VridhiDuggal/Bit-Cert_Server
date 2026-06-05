@@ -1,0 +1,12 @@
+node_modules/
+.env
+uploads/
+dist/
+logs/
+.git/
+*.test.js
+*.spec.js
+__tests__/
+coverage/
+.nyc_output/
+*.log

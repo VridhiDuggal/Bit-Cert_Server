@@ -2,10 +2,15 @@
 
 const Joi             = require('joi');
 const { StatusCodes } = require('http-status-codes');
-const { generateResetToken, resetPassword } = require('../services/auth.service');
+const { sendOtp, verifyOtp, resetPassword } = require('../services/auth.service');
 
-const forgotSchema = Joi.object({
+const emailSchema = Joi.object({
   email: Joi.string().email().lowercase().required(),
+});
+
+const verifyOtpSchema = Joi.object({
+  email: Joi.string().email().lowercase().required(),
+  otp:   Joi.string().length(6).pattern(/^\d{6}$/).required(),
 });
 
 const resetSchema = Joi.object({
@@ -15,7 +20,7 @@ const resetSchema = Joi.object({
 
 async function forgotPasswordController(req, res, next) {
   try {
-    const { error, value } = forgotSchema.validate(req.body, { abortEarly: false });
+    const { error, value } = emailSchema.validate(req.body, { abortEarly: false });
     if (error) {
       return res.status(StatusCodes.UNPROCESSABLE_ENTITY).json({
         success: false,
@@ -23,12 +28,25 @@ async function forgotPasswordController(req, res, next) {
         errors:  error.details.map(d => d.message),
       });
     }
+    await sendOtp(value.email);
+    return res.status(StatusCodes.OK).json({ success: true, message: 'OTP sent to your email address.' });
+  } catch (err) {
+    next(err);
+  }
+}
 
-    await generateResetToken(value.email);
-    return res.status(StatusCodes.OK).json({
-      success: true,
-      message: 'If an account with that email exists, a reset link has been sent.',
-    });
+async function verifyOtpController(req, res, next) {
+  try {
+    const { error, value } = verifyOtpSchema.validate(req.body, { abortEarly: false });
+    if (error) {
+      return res.status(StatusCodes.UNPROCESSABLE_ENTITY).json({
+        success: false,
+        message: 'Validation failed.',
+        errors:  error.details.map(d => d.message),
+      });
+    }
+    const reset_token = await verifyOtp(value.email, value.otp);
+    return res.status(StatusCodes.OK).json({ success: true, reset_token });
   } catch (err) {
     next(err);
   }
@@ -44,7 +62,6 @@ async function resetPasswordController(req, res, next) {
         errors:  error.details.map(d => d.message),
       });
     }
-
     await resetPassword(value.token, value.password);
     return res.status(StatusCodes.OK).json({ success: true, message: 'Password reset successfully.' });
   } catch (err) {
@@ -52,4 +69,5 @@ async function resetPasswordController(req, res, next) {
   }
 }
 
-module.exports = { forgotPasswordController, resetPasswordController };
+module.exports = { forgotPasswordController, verifyOtpController, resetPasswordController };
+

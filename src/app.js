@@ -99,6 +99,7 @@ const verifyLimiter = rateLimit({
 app.use('/api/org/login',                  authLimiter);
 app.use('/api/recipient/login',            authLimiter);
 app.use('/api/auth/forgot-password',       authLimiter);
+app.use('/api/auth/verify-otp',            authLimiter);
 app.use('/api/auth/reset-password',        authLimiter);
 app.use('/api/recipient/accept-invite',    inviteLimiter);
 app.use('/api/verify',                     verifyLimiter);

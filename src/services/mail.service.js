@@ -44,6 +44,17 @@ async function sendCertificateIssuedEmail(recipientEmail, recipientName, orgName
   });
 }
 
+async function sendOtpEmail(email, otp) {
+  const html = await renderTemplate('otp.ejs', { otp });
+  await transporter.sendMail({
+    from:    process.env.SMTP_FROM,
+    to:      email,
+    subject: 'Your Bit-Cert password reset code',
+    text:    `Your one-time password reset code is: ${otp}. It expires in 10 minutes.`,
+    html,
+  });
+}
+
 async function sendPasswordResetEmail(email, resetLink) {
   const html = await renderTemplate('password-reset.ejs', { resetLink });
   await transporter.sendMail({
@@ -55,4 +66,4 @@ async function sendPasswordResetEmail(email, resetLink) {
   });
 }
 
-module.exports = { sendInviteEmail, sendCertificateIssuedEmail, sendPasswordResetEmail };
+module.exports = { sendInviteEmail, sendCertificateIssuedEmail, sendOtpEmail, sendPasswordResetEmail };

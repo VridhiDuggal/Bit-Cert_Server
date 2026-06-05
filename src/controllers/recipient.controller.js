@@ -231,7 +231,7 @@ async function updateProfileController(req, res, next) {
 
 const changePasswordSchema = Joi.object({
   current_password: Joi.string().required(),
-  new_password:     Joi.string().min(10).required(),
+  new_password:     Joi.string().min(8).required(),
 });
 
 async function changePasswordController(req, res, next) {

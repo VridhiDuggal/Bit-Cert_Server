@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your Bit-Cert OTP</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f5f5f5; font-family: Arial, sans-serif; color: #1a1a1a; }
+    .wrapper { padding: 40px 16px; }
+    .container { background-color: #ffffff; max-width: 600px; margin: 0 auto; border-radius: 6px; border: 1px solid #e0e0e0; overflow: hidden; }
+    .body { padding: 40px 40px 32px; }
+    h1 { font-size: 22px; font-weight: 700; margin: 0 0 16px; color: #111111; }
+    p { font-size: 15px; line-height: 1.6; margin: 0 0 24px; color: #444444; }
+    .otp-box { display: inline-block; background-color: #f4f4f4; border: 1px solid #dddddd; border-radius: 6px; padding: 14px 32px; font-size: 32px; font-weight: 700; letter-spacing: 10px; color: #111111; margin: 4px 0 24px; }
+    .expiry { font-size: 13px; color: #888888; margin: 0 0 16px; }
+    .footer { padding: 20px 40px; border-top: 1px solid #eeeeee; }
+    .footer p { font-size: 12px; color: #999999; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container">
+      <div class="body">
+        <h1>Reset your password</h1>
+        <p>Use the one-time code below to reset your Bit-Cert account password. This code is valid for <strong>10 minutes</strong>.</p>
+        <div class="otp-box"><%= otp %></div>
+        <p class="expiry">Do not share this code with anyone.</p>
+      </div>
+      <div class="footer">
+        <p>If you didn't request a password reset, you can safely ignore this email. Your password won't change.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
